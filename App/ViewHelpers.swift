@@ -19,6 +19,61 @@ extension Color {
     }
 }
 
+/// Shared corner-radius scale so every surface uses the same soft, continuous curve.
+enum CPALayout {
+    /// Primary elevated cards (sections, rows, metric tiles).
+    static let cardRadius: CGFloat = 20
+    /// Nested rows, callouts and tinted insets within a card.
+    static let innerRadius: CGFloat = 14
+    /// Text-input surfaces.
+    static let fieldRadius: CGFloat = 14
+    /// Small square provider/icon chips.
+    static let chipRadius: CGFloat = 11
+}
+
+extension View {
+    /// Primary elevated surface: translucent material, soft continuous corners,
+    /// a hairline border for definition, and a restrained drop shadow for depth.
+    func cpaCard(cornerRadius: CGFloat = CPALayout.cardRadius) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return self
+            .background(.regularMaterial, in: shape)
+            .overlay(shape.strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
+            .shadow(color: Color.black.opacity(0.05), radius: 9, x: 0, y: 4)
+    }
+
+    /// Tinted inset surface for nested rows, banners and callouts inside a card.
+    func cpaInset(_ fill: Color, cornerRadius: CGFloat = CPALayout.innerRadius) -> some View {
+        background(fill, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+
+    /// Text-input surface that adapts to light/dark like a system field.
+    func cpaFieldSurface(cornerRadius: CGFloat = CPALayout.fieldRadius) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return self
+            .background(.background, in: shape)
+            .overlay(shape.strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func onScenePhaseChange(
+        _ phase: ScenePhase,
+        perform action: @escaping (ScenePhase) -> Void
+    ) -> some View {
+        if #available(iOS 17.0, macOS 14.0, *) {
+            onChange(of: phase) { _, newPhase in
+                action(newPhase)
+            }
+        } else {
+            onChange(of: phase) { newPhase in
+                action(newPhase)
+            }
+        }
+    }
+}
+
 extension CPAStatusKind {
     var tint: Color {
         switch self {
@@ -40,66 +95,41 @@ extension CPAStatusKind {
     }
 }
 
-extension CPAAccount {
-    var quotaLine: String {
-        switch statusKind {
-        case .available:
-            if let credits = antigravityCredits, credits.known {
-                return credits.available ? "Credits \(compactNumber(credits.creditAmount))" : "Credits 不足"
-            }
-            return "额度可用"
-        case .cooling:
-            if let credits = antigravityCredits, credits.known, !credits.available {
-                return "Credits 不足"
-            }
-            if let nextRecoveryDate {
-                return "冷却至 \(shortTime(nextRecoveryDate))"
-            }
-            return quota?.reason ?? "额度受限"
-        case .pending:
-            return "刷新中"
-        case .error:
-            return statusMessage ?? lastError?.message ?? "异常"
-        case .disabled:
-            return "已停用"
-        case .unknown:
-            return "未知"
-        case .all:
-            return ""
-        }
-    }
-}
-
 func providerIcon(_ provider: String) -> String {
-    switch provider.lowercased() {
-    case "gemini", "gemini-cli", "antigravity", "vertex":
-        return "sparkles"
-    case "codex", "openai":
-        return "curlybraces.square.fill"
-    case "claude", "anthropic":
-        return "text.bubble.fill"
-    case "kimi":
-        return "moon.stars.fill"
-    case "xai":
-        return "xmark.seal.fill"
-    case "all":
+    if provider == "all" {
         return "circle.grid.2x2"
-    default:
-        return "key.fill"
     }
+    return ProviderCatalog.info(for: provider).symbolName
 }
 
 func providerTint(_ provider: String) -> Color {
-    switch provider.lowercased() {
-    case "gemini", "gemini-cli", "antigravity", "vertex":
+    if provider == "all" {
+        return .secondary
+    }
+    return providerAccentColor(ProviderCatalog.info(for: provider).accentName)
+}
+
+private func providerAccentColor(_ accentName: String) -> Color {
+    switch accentName {
+    case "teal":
         return .teal
-    case "codex", "openai":
-        return .green
-    case "claude", "anthropic":
+    case "mint":
+        return .mint
+    case "orange":
+        return .orange
+    case "blue":
+        return .blue
+    case "indigo":
         return .indigo
-    case "kimi":
+    case "purple":
         return .purple
-    case "xai":
+    case "gray":
+        return .gray
+    case "pink":
+        return .pink
+    case "green":
+        return .green
+    case "red":
         return .red
     default:
         return .secondary
@@ -114,6 +144,91 @@ func percent(_ value: Double) -> String {
     formatter.numberStyle = .percent
     formatter.maximumFractionDigits = 0
     return formatter.string(from: NSNumber(value: value)) ?? "0%"
+}
+
+func quotaTint(_ percent: Double?, isUsable: Bool? = nil) -> Color {
+    if isUsable == false {
+        return .red
+    }
+    guard let percent, percent.isFinite else {
+        return .secondary
+    }
+    if percent <= 15 {
+        return .red
+    }
+    if percent <= 35 {
+        return .orange
+    }
+    return .green
+}
+
+func quotaResetText(_ window: QuotaWindow) -> String? {
+    if let detail = normalizedQuotaResetDetail(window.detailText) {
+        return detail
+    }
+    if let seconds = window.resetAfterSeconds {
+        return normalizedQuotaResetDetail(displayDuration(seconds: seconds))
+    }
+    if let resetAt = window.resetAt {
+        let remaining = resetAt.timeIntervalSinceNow
+        return remaining > 0 ? displayDuration(seconds: remaining) : "现在"
+    }
+    return nil
+}
+
+private func normalizedQuotaResetDetail(_ value: String?) -> String? {
+    let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard !trimmed.isEmpty else {
+        return nil
+    }
+    let normalized = trimmed.lowercased()
+    guard normalized != "-" && normalized != "--" && normalized != "unknown" && normalized != "none" else {
+        return nil
+    }
+    return trimmed
+}
+
+struct QuotaWindowMetadataLabels: View {
+    let window: QuotaWindow
+    let font: Font
+
+    var body: some View {
+        if hasMetadata {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    labels
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    labels
+                }
+            }
+            .font(font)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+        }
+    }
+
+    private var hasMetadata: Bool {
+        let hasAmount = window.amountText?.isEmpty == false
+        let hasReset = resetText?.isEmpty == false
+        return hasAmount || hasReset
+    }
+
+    private var resetText: String? {
+        quotaResetText(window)
+    }
+
+    @ViewBuilder
+    private var labels: some View {
+        if let amountText = window.amountText, !amountText.isEmpty {
+            Label(amountText, systemImage: "number")
+        }
+        if let resetText, !resetText.isEmpty {
+            Label(resetText, systemImage: "clock")
+        }
+    }
 }
 
 func shortTime(_ date: Date) -> String {

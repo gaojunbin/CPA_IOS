@@ -2,13 +2,32 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var connectionStore: ConnectionStore
+    @EnvironmentObject private var notificationRouter: NotificationRouter
+    @State private var showsPreview = false
 
     var body: some View {
         Group {
-            if let connection = connectionStore.connection {
-                DashboardView(connection: connection)
+            if showsPreview {
+                DashboardView(
+                    connection: .preview,
+                    previewSnapshot: ManagementDashboard.demo(),
+                    onClosePreview: { showsPreview = false }
+                )
+            } else if let connection = connectionStore.connection {
+                DashboardView(
+                    connection: connection,
+                    onShowPreview: { showsPreview = true },
+                    attentionFocusRequestID: notificationRouter.attentionFocusRequestID
+                )
             } else {
-                ConnectionSetupView()
+                ConnectionSetupView {
+                    showsPreview = true
+                }
+            }
+        }
+        .onReceive(notificationRouter.$attentionFocusRequestID) { requestID in
+            if requestID > 0 {
+                showsPreview = false
             }
         }
     }
@@ -16,6 +35,7 @@ struct RootView: View {
 
 struct ConnectionSetupView: View {
     @EnvironmentObject private var connectionStore: ConnectionStore
+    let onPreview: () -> Void
 
     @State private var baseURL = ""
     @State private var managementKey = ""
@@ -28,11 +48,20 @@ struct ConnectionSetupView: View {
                 AppBackground()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Image(systemName: "server.rack")
-                                .font(.system(size: 42, weight: .semibold))
-                                .foregroundStyle(.teal)
-                                .symbolRenderingMode(.hierarchical)
+                        VStack(alignment: .leading, spacing: 14) {
+                            Image(systemName: "gauge.with.dots.needle.67percent")
+                                .font(.system(size: 38, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 76, height: 76)
+                                .background(
+                                    LinearGradient(
+                                        colors: [Color.teal, Color.cyan],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                )
+                                .shadow(color: Color.teal.opacity(0.35), radius: 14, x: 0, y: 8)
 
                             Text("CPA 面板")
                                 .font(.system(size: 34, weight: .bold, design: .rounded))
@@ -50,7 +79,8 @@ struct ConnectionSetupView: View {
                                 systemImage: "link",
                                 placeholder: "https://cpa.example.com",
                                 text: $baseURL,
-                                isSecure: false
+                                isSecure: false,
+                                isSensitive: true
                             )
 
                             InputField(
@@ -58,7 +88,8 @@ struct ConnectionSetupView: View {
                                 systemImage: "key.fill",
                                 placeholder: "Management key",
                                 text: $managementKey,
-                                isSecure: true
+                                isSecure: true,
+                                isSensitive: true
                             )
 
                             if let normalized = try? CPABaseURLNormalizer.normalize(baseURL),
@@ -95,10 +126,20 @@ struct ConnectionSetupView: View {
                                 .frame(height: 50)
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(isConnecting)
+                            .disabled(!canConnect)
+
+                            Button {
+                                onPreview()
+                            } label: {
+                                Label("查看演示面板", systemImage: "rectangle.on.rectangle")
+                                    .fontWeight(.semibold)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
+                            }
+                            .buttonStyle(.bordered)
                         }
                         .padding(16)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .cpaCard()
                     }
                     .padding(20)
                 }
@@ -122,12 +163,18 @@ struct ConnectionSetupView: View {
                 throw ConnectionError.emptyManagementKey
             }
             let client = CPAClient(baseURL: normalizedURL, managementKey: key)
-            _ = try await client.fetchDashboard()
+            _ = try await client.fetchDashboard(includeLiveUsage: false)
             try connectionStore.save(baseURLString: normalizedURL.absoluteString, managementKey: key)
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = displayErrorMessage(error.localizedDescription, limit: 180)
         }
         isConnecting = false
+    }
+
+    private var canConnect: Bool {
+        !isConnecting &&
+            !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !managementKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
@@ -137,6 +184,7 @@ struct InputField: View {
     let placeholder: String
     @Binding var text: String
     let isSecure: Bool
+    let isSensitive: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -157,25 +205,36 @@ struct InputField: View {
                 }
             }
             .textContentType(isSecure ? .password : .URL)
+            .privacySensitive(isSensitive)
             .font(.body.weight(.medium))
             .padding(.horizontal, 14)
             .frame(height: 48)
-            .background(.background, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .cpaFieldSurface()
         }
     }
 }
 
 struct AppBackground: View {
     var body: some View {
-        LinearGradient(
-            colors: [
-                Color.cpaSystemBackground,
-                Color.teal.opacity(0.08),
-                Color.indigo.opacity(0.06)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+        ZStack {
+            Color.cpaSystemBackground
+
+            // Soft teal aurora anchored in the top-leading corner.
+            RadialGradient(
+                colors: [Color.teal.opacity(0.20), Color.teal.opacity(0.0)],
+                center: .topLeading,
+                startRadius: 0,
+                endRadius: 540
+            )
+
+            // Cooler indigo wash drifting up from the bottom-trailing corner.
+            RadialGradient(
+                colors: [Color.indigo.opacity(0.16), Color.indigo.opacity(0.0)],
+                center: .bottomTrailing,
+                startRadius: 0,
+                endRadius: 580
+            )
+        }
         .ignoresSafeArea()
     }
 }

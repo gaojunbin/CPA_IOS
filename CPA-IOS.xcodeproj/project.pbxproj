@@ -20,6 +20,10 @@
 		1A0000000000000000000111 /* URLNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000011 /* URLNormalizer.swift */; };
 		1A0000000000000000000112 /* CPAModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000012 /* CPAModels.swift */; };
 		1A0000000000000000000113 /* CPAClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000013 /* CPAClient.swift */; };
+		1A0000000000000000000114 /* CPAUsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000014 /* CPAUsageParser.swift */; };
+		1A0000000000000000000115 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000000B /* PrivacyInfo.xcprivacy */; };
+		1A0000000000000000000116 /* QuotaAlertNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000000C /* QuotaAlertNotifier.swift */; };
+		1A0000000000000000000117 /* BackgroundQuotaRefreshScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000000D /* BackgroundQuotaRefreshScheduler.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,10 +37,14 @@
 		1A0000000000000000000008 /* ViewHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewHelpers.swift; sourceTree = "<group>"; };
 		1A0000000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		1A000000000000000000000A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1A000000000000000000000B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		1A000000000000000000000C /* QuotaAlertNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuotaAlertNotifier.swift; sourceTree = "<group>"; };
+		1A000000000000000000000D /* BackgroundQuotaRefreshScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundQuotaRefreshScheduler.swift; sourceTree = "<group>"; };
 		1A0000000000000000000010 /* CPAAPIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPAAPIError.swift; sourceTree = "<group>"; };
 		1A0000000000000000000011 /* URLNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLNormalizer.swift; sourceTree = "<group>"; };
 		1A0000000000000000000012 /* CPAModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPAModels.swift; sourceTree = "<group>"; };
 		1A0000000000000000000013 /* CPAClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPAClient.swift; sourceTree = "<group>"; };
+		1A0000000000000000000014 /* CPAUsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPAUsageParser.swift; sourceTree = "<group>"; };
 		1A0000000000000000000020 /* CPA-IOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "CPA-IOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -55,7 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				1A0000000000000000000301 /* App */,
-				1A0000000000000000000302 /* CPAKit */,
+				1A0000000000000000000302 /* Sources/CPAKit */,
 				1A0000000000000000000303 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -70,20 +78,24 @@
 				1A0000000000000000000007 /* SettingsView.swift */,
 				1A0000000000000000000003 /* DashboardViewModel.swift */,
 				1A0000000000000000000002 /* ConnectionStore.swift */,
+				1A000000000000000000000C /* QuotaAlertNotifier.swift */,
+				1A000000000000000000000D /* BackgroundQuotaRefreshScheduler.swift */,
 				1A0000000000000000000008 /* ViewHelpers.swift */,
 				1A0000000000000000000009 /* Info.plist */,
+				1A000000000000000000000B /* PrivacyInfo.xcprivacy */,
 				1A000000000000000000000A /* Assets.xcassets */,
 			);
 			path = App;
 			sourceTree = "<group>";
 		};
-		1A0000000000000000000302 /* CPAKit */ = {
+		1A0000000000000000000302 /* Sources/CPAKit */ = {
 			isa = PBXGroup;
 			children = (
 				1A0000000000000000000010 /* CPAAPIError.swift */,
 				1A0000000000000000000011 /* URLNormalizer.swift */,
 				1A0000000000000000000012 /* CPAModels.swift */,
 				1A0000000000000000000013 /* CPAClient.swift */,
+				1A0000000000000000000014 /* CPAUsageParser.swift */,
 			);
 			path = Sources/CPAKit;
 			sourceTree = "<group>";
@@ -133,9 +145,10 @@
 			};
 			buildConfigurationList = 1A0000000000000000000600 /* Build configuration list for PBXProject "CPA-IOS" */;
 			compatibilityVersion = "Xcode 15.0";
-			developmentRegion = en;
+			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				"zh-Hans",
 				en,
 				Base,
 			);
@@ -155,6 +168,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1A0000000000000000000109 /* Assets.xcassets in Resources */,
+				1A0000000000000000000115 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -172,11 +186,14 @@
 				1A0000000000000000000107 /* SettingsView.swift in Sources */,
 				1A0000000000000000000103 /* DashboardViewModel.swift in Sources */,
 				1A0000000000000000000102 /* ConnectionStore.swift in Sources */,
+				1A0000000000000000000116 /* QuotaAlertNotifier.swift in Sources */,
+				1A0000000000000000000117 /* BackgroundQuotaRefreshScheduler.swift in Sources */,
 				1A0000000000000000000108 /* ViewHelpers.swift in Sources */,
 				1A0000000000000000000110 /* CPAAPIError.swift in Sources */,
 				1A0000000000000000000111 /* URLNormalizer.swift in Sources */,
 				1A0000000000000000000112 /* CPAModels.swift in Sources */,
 				1A0000000000000000000113 /* CPAClient.swift in Sources */,
+				1A0000000000000000000114 /* CPAUsageParser.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -307,7 +324,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 9DF9GJBLTF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = App/Info.plist;
@@ -319,9 +336,11 @@
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -332,7 +351,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 9DF9GJBLTF;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = App/Info.plist;
@@ -344,9 +363,11 @@
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
