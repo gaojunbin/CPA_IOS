@@ -19,7 +19,7 @@ CPA Panel is a client for self-hosted CLIProxyAPI instances. Review can start wi
 Suggested review note:
 
 ```text
-CPA Panel connects to a user-provided CLIProxyAPI management endpoint and displays account status, quota windows, model runtime status badges, recent request activity, and API key usage. No account is created in the app. A built-in demo dashboard is available on the first screen for UI review without credentials. Please use the provided demo server URL and management key to test live networking.
+CPA Panel connects to a user-provided CLIProxyAPI management endpoint and displays account status, quota windows, model runtime status badges, and recent request activity. No account is created in the app. A built-in demo dashboard is available on the first screen for UI review without credentials. Please use the provided demo server URL and management key to test live networking.
 ```
 
 ## Privacy Answers
@@ -31,11 +31,11 @@ CPA Panel connects to a user-provided CLIProxyAPI management endpoint and displa
 - Demo mode: The bundled demo dashboard and account-detail model metadata are generated locally; demo mode does not store credentials.
 - Network: The app sends the configured management key only to the user-provided CLIProxyAPI server using an Authorization header.
 - Network caching: Management requests use an ephemeral URLSession with persistent URL cache and cookie storage disabled, and include no-store cache headers.
-- API key usage: The management API may return API key usage counters keyed by raw API keys. CPA Panel displays masked key text only and uses stable hashed row identifiers instead of raw key strings.
-- Sensitive UI fields: Management key entry fields, dashboard server hosts, dashboard account identifiers, project IDs, API base URLs, and account-detail identifiers are marked privacy-sensitive in SwiftUI for system redaction contexts.
+- API key usage: The management API may return API key usage counters keyed by raw API keys. CPA Panel does not surface API key usage in its UI.
+- Sensitive UI fields: Management key entry fields, dashboard server hosts, dashboard account identifiers, project IDs, and account-detail identifiers are marked privacy-sensitive in SwiftUI for system redaction contexts.
 - Notifications: Optional low-quota alerts are local notifications generated on device after refresh; the first connection setup keeps alerts off and alerts must be enabled from Settings after notification permission is granted. The app does not use remote push notifications.
 - Notification privacy: Notification text hides account and server identifiers by default. Users can opt in to detailed notification text from Settings; turning low-quota alerts off also turns detailed notification text off.
-- Notification tap behavior: Tapping a low-quota local notification opens the attention-only dashboard view.
+- Notification tap behavior: Tapping a low-quota local notification opens the dashboard.
 - Background App Refresh: When low-quota alerts are enabled for a saved connection, the app registers a `BGAppRefreshTask` to opportunistically refresh live quota and generate local alerts. iOS controls task timing; the app does not run continuous background monitoring and does not use remote push.
 - Support diagnostics: Settings can copy a diagnostics report for support. It includes generation time, app/connection settings, and Background App Refresh status, and explicitly does not include the management key value.
 - Notification diagnostics: The same report includes notification authorization, alert presentation, and badge availability so local alert issues can be diagnosed without credentials.
@@ -53,12 +53,12 @@ Keep App Store Connect answers aligned with the actual demo server and distribut
 
 - Open the built-in demo dashboard first to inspect the main account, quota, model runtime badge, and status views without credentials.
 - After saving a connection, open Settings and use the demo action to confirm demo mode remains available without clearing credentials.
-- Connect to the provided CLIProxyAPI test server and refresh the dashboard once to verify live quota, account detail, and API key usage.
+- Connect to the provided CLIProxyAPI test server and refresh the dashboard once to verify live quota and account detail.
 - Enable low-quota alerts in Settings while keeping account-name notification text off, then refresh an account set that includes a low, cooling, or failing account.
 - Confirm Settings shows notification delivery or badge availability before copying diagnostics.
 - Confirm Background App Refresh is enabled for CPA Panel on the review device; background refresh scheduling is opportunistic and should be treated as a supplemental local-alert path, not the deterministic smoke-test path.
 - Confirm the foreground notification uses generic text and a `本地提醒` subtitle unless detailed notification text is explicitly enabled.
-- Tap the local notification and confirm CPA Panel opens the attention-only dashboard list.
+- Tap the local notification and confirm CPA Panel opens the dashboard.
 - Confirm the local app icon badge matches the number of accounts that need attention, then disable low-quota alerts and confirm the badge plus pending CPA alert notifications clear.
 - If notification permission is denied, use the Settings recovery button to open the app notification settings and confirm the badge clears.
 

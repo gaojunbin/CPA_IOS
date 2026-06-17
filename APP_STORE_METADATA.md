@@ -19,7 +19,7 @@ Use this copy as the App Store Connect source of truth for the first iOS submiss
 
 CPA Panel 是面向 CLIProxyAPI 用户的移动监控工具，用于在 iPhone 和 iPad 上快速查看账号池状态和剩余额度。
 
-你可以连接自己的 CLIProxyAPI 管理端点，查看 Codex/OpenAI、Claude、Antigravity、Kimi、Grok 等来源的实时额度窗口、冷却状态、模型限制、最近请求和 API Key 使用情况。仪表盘会突出最低剩余额度、需要关注的账号、请求成功率和各 provider 的 5h/7d 剩余平均值。
+你可以连接自己的 CLIProxyAPI 管理端点，查看 Codex/OpenAI、Claude、Antigravity、Kimi、Grok 等来源的实时额度窗口、冷却状态、模型限制和最近请求。不同渠道的额度展示各不相同（Codex 为 5 小时/7 天窗口、Grok 为额度余额、Antigravity 为各模型配额等），均按服务端返回的实时数据呈现；仪表盘以 Codex 账号的 5h/7d 平均剩余额度为核心指标，并按 provider 分组展示各渠道额度。
 
 CPA Panel 只读取用户提供的管理 API，不创建账号，不管理账号池，也不把管理密钥发送到第三方服务。管理密钥保存在设备 Keychain 中，服务器地址和刷新间隔保存在本机 UserDefaults 中。内置演示面板可在不保存任何凭据的情况下查看主要界面。
 
@@ -31,7 +31,7 @@ CLIProxyAPI,CPA,Codex,Claude,Kimi,Grok,Antigravity,quota,API Key,开发者工具
 
 ## Review Notes
 
-CPA Panel connects to a user-provided CLIProxyAPI management endpoint and displays account status, quota windows, model runtime status badges, recent request activity, and API key usage. No account is created in the app. A built-in demo dashboard with account-detail model metadata is available on the first screen for UI review without credentials. Please use the provided demo server URL and management key to test live networking.
+CPA Panel connects to a user-provided CLIProxyAPI management endpoint and displays account status, quota windows, model runtime status badges, and recent request activity. No account is created in the app. A built-in demo dashboard with account-detail model metadata is available on the first screen for UI review without credentials. Please use the provided demo server URL and management key to test live networking.
 
 ## Privacy Answers
 
@@ -41,7 +41,7 @@ CPA Panel connects to a user-provided CLIProxyAPI management endpoint and displa
 - Contacts, location, photos, camera, microphone, health, financial data: Not collected by the bundled app code.
 - Local storage: Server URL and refresh interval are stored in UserDefaults; management key is stored in Keychain.
 - Network: The configured management key is sent only to the user-provided CLIProxyAPI server using an Authorization header.
-- Sensitive UI fields: Management key entry fields, dashboard server hosts, dashboard account identifiers, project IDs, API base URLs, and account-detail identifiers are marked privacy-sensitive in SwiftUI.
+- Sensitive UI fields: Management key entry fields, dashboard server hosts, dashboard account identifiers, project IDs, and account-detail identifiers are marked privacy-sensitive in SwiftUI.
 - Notifications: Optional low-quota alerts are local notifications only; the app does not register for remote push notifications.
 - Background App Refresh: Used only to opportunistically refresh quota for enabled local low-quota alerts. iOS controls timing and the app does not perform continuous background monitoring.
 - Analytics and crash reporting: None in the bundled app code.
@@ -50,10 +50,10 @@ CPA Panel connects to a user-provided CLIProxyAPI management endpoint and displa
 
 - First screen with the built-in demo action and connection form.
 - Settings screen with the demo action available after a connection is saved.
-- Dashboard summary showing lowest remaining quota, attention count, provider sections, and live quota sync state.
+- Dashboard summary showing Codex 5h/7d average remaining quota, account count, and provider sections.
 - Account detail showing live quota windows, bundled demo or live model runtime status badges, recent requests, and account metadata.
 - Settings screen showing refresh interval, attention threshold, local alert controls, notification delivery and badge status, Background App Refresh status, privacy-preserving notification text option, and no-key diagnostics copy action.
-- Notification permission recovery, local alert behavior, Background App Refresh setting, and notification-tap attention view if included in the review flow.
+- Notification permission recovery, local alert behavior, Background App Refresh setting, and notification-tap dashboard view if included in the review flow.
 
 ## Required Before Upload
 

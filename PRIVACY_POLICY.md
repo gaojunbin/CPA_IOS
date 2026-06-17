@@ -32,7 +32,7 @@ Low-quota alerts are optional local notifications generated on the device after 
 
 Notification text hides account names and server names by default. Users can opt in to detailed notification text in Settings.
 
-Tapping a low-quota notification opens the app to the attention-only dashboard view. This behavior is local to the device and does not use remote push notifications.
+Tapping a low-quota notification opens the app to the dashboard. This behavior is local to the device and does not use remote push notifications.
 
 ## User Control
 
@@ -40,7 +40,7 @@ Users can clear the saved connection in Settings. This removes the saved server 
 
 Users can copy a support diagnostics report from Settings. The report can include generation time, app version, connection status, server URL, refresh interval, alert settings, notification authorization, alert presentation, badge availability, and Background App Refresh status. It does not include the management key value.
 
-Management key entry fields, dashboard server hosts, dashboard account identifiers, project IDs, API base URLs, and account-detail identifiers are marked privacy-sensitive in SwiftUI redaction contexts.
+Management key entry fields, dashboard server hosts, dashboard account identifiers, project IDs, and account-detail identifiers are marked privacy-sensitive in SwiftUI redaction contexts.
 
 If analytics, crash reporting, hosted telemetry, or additional data collection are added in a future release, this policy and the app privacy manifest must be updated before release.
 

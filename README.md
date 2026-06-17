@@ -8,15 +8,10 @@ The app mirrors the CPA macOS status bar workflow on iPhone/iPad:
 - Preview the finished dashboard with bundled demo data before saving any credentials, or reopen the demo from Settings later.
 - Demo mode covers Codex, Claude, Antigravity, Kimi, Grok, and a disabled Gemini account.
 - Demo account detail includes bundled model metadata and runtime badges, so review can inspect model status without a live server.
-- Show 5h/7d remaining quota averages for supported providers.
-- Highlight the lowest remaining quota and the number of accounts that need attention on the first screen.
+- Show Codex 5h/7d remaining-quota averages as the headline metric, scoped to Codex accounts only, with a caption clarifying that other providers report their own quota shapes per card.
 - Pin low-quota, cooling, and error accounts near the top of the dashboard.
-- Use one configurable attention threshold for the dashboard attention count and optional local alerts.
-- Sort attention lists and local alert candidates with that same threshold.
-- Filter the full account list to only accounts that need attention.
-- Search by account name, provider key or display name, auth index, project, source, note, account type, and effective plan.
-- Jump from the attention section directly into the full attention-only list.
-- Clear active filters from the dashboard in one action.
+- Use one configurable attention threshold for optional low-quota local alerts.
+- Sort local alert candidates with that same threshold.
 - Fetch per-account quota windows through `/v0/management/api-call`.
 - Refresh one account directly from its detail screen and see when live quota was last synced.
 - Apply account detail refresh results back to the dashboard list immediately.
@@ -24,32 +19,24 @@ The app mirrors the CPA macOS status bar workflow on iPhone/iPad:
 - Group accounts by provider, matching the macOS status popover structure.
 - Load the account list first, then sync live quota progressively with bounded concurrency.
 - Keep the last live quota visible while a new refresh is syncing.
-- Keep existing dashboard data and filters when only refresh or alert settings change, but reset filters when switching to a different server or management key.
-- Show when dashboard live quota sync last completed.
+- Keep existing dashboard data when only refresh or alert settings change.
 - Show quota reset timing directly in account rows when the upstream provider returns it.
 - Display reset countdowns and provider quota windows with localized Chinese timing text.
 - Show provider-level 5h/7d averages and lowest remaining quota in each provider section header.
-- Show CLIProxyAPI version, short commit, and build date when available.
-- Show the next foreground auto-refresh time in the dashboard metadata.
+- Render each channel's quota from the live web payload instead of hard-coded fields, so Codex shows 5h/7d windows, Grok shows credit balance, Antigravity shows per-model quota, and so on.
 - Coalesce refresh triggers so manual refresh, foreground resume, and timer refresh do not stack duplicate sync jobs.
 - Show compact localized connection and network errors for unreachable servers.
-- Surface provider runtime status, model cooldowns, recent request activity, API key usage, and account metadata.
+- Surface provider runtime status, model cooldowns, recent request activity, and account metadata in account detail.
 - Mark available models with runtime status badges in account detail, with abnormal or limited models sorted first.
 - Treat account-level backend `last_error` values as attention-worthy runtime errors.
-- Sort API key usage by failure count and failure rate before normal keys.
-- Filter API key usage with the same dashboard provider, search, attention, and applicable status controls.
-- Keep the API key usage section visible with a scoped empty state when filters hide all key rows.
-- Show API key recent request activity with compact sparklines.
-- Mask API keys in the API key usage section and use stable hashed row identifiers instead of raw keys.
-- Mark management keys, server hosts, dashboard account identifiers, project IDs, API base URLs, and account-detail identifiers as privacy-sensitive in SwiftUI.
+- Mark management keys, server hosts, dashboard account identifiers, project IDs, and account-detail identifiers as privacy-sensitive in SwiftUI.
 - Copy a support diagnostics report from Settings without including the management key.
 - Show notification delivery and badge availability in Settings and support diagnostics.
 - Show backend refresh schedule and Codex subscription dates in account detail when CLIProxyAPI returns them.
-- Mask short API keys completely or partially so compact rows do not expose secrets.
 - Auto-refresh in the foreground with a configurable interval.
 - Optionally send local notifications when refreshed accounts are low, cooling, or failing.
 - When low-quota alerts are enabled, register Background App Refresh so iOS can opportunistically refresh quota and generate local alerts while the app is not foregrounded.
-- Open the attention-only dashboard view when a low-quota local notification is tapped.
+- Open the dashboard when a low-quota local notification is tapped.
 
 ## Backend Requirements
 
@@ -75,7 +62,7 @@ The first connection setup does not inherit stale alert defaults; low-quota aler
 Background App Refresh is scheduled only while a saved connection has low-quota alerts enabled. iOS controls exact timing, so foreground refresh remains the deterministic update path.
 Settings shows the current local notification delivery state and the iOS Background App Refresh status when low-quota alerts are enabled, and diagnostics include notification authorization, alert presentation, badge availability, and Background App Refresh status for support.
 Notification banners hide account names and server names by default; users can opt in to detailed notification text. Turning low-quota alerts off also turns detailed notification text off.
-Tapping a low-quota notification opens CPA Panel to the attention-only dashboard list.
+Tapping a low-quota notification opens CPA Panel to the dashboard.
 If notification permission is denied while saving Settings, the app keeps the verified connection and refresh settings but leaves low-quota notifications disabled.
 If the user turns off notification banners/alerts in iOS Settings, CPA Panel treats low-quota alerts as unavailable even if the app still has general notification authorization.
 The notification recovery button opens the iOS notification settings page when available, with the app settings page as a fallback.
@@ -91,7 +78,7 @@ Before App Store submission on a machine with full Xcode:
 - Set `DEVELOPMENT_TEAM` and confirm `PRODUCT_BUNDLE_IDENTIFIER`.
 - Run `Scripts/validate_xcode_release.sh` to execute the local checks, simulator build, and Release archive gate.
 - Build and run the `CPA-IOS` target on a physical device.
-- Test first connection, foreground refresh, pull-to-refresh, provider filters, and account detail live quota refresh against a real CLIProxyAPI server.
+- Test first connection, foreground refresh, pull-to-refresh, and account detail live quota refresh against a real CLIProxyAPI server.
 - Enable low-quota alerts and Background App Refresh on a physical device, then confirm the background refresh task can schedule local low-quota alerts.
 - Validate the generated archive in Xcode Organizer.
 - Review the generated privacy report and App Store Connect privacy answers against the actual distribution model.
@@ -109,12 +96,11 @@ Use `SUPPORT.md` and `PRIVACY_POLICY.md` as the source text for public support a
 - Low-quota alerts use local notifications only; the app does not register for remote push notifications.
 - `BGTaskSchedulerPermittedIdentifiers` and `UIBackgroundModes` declare the local Background App Refresh task used only for optional low-quota alert refreshes.
 - Notification text hides account and server identifiers by default and only shows details when the user enables that setting.
-- Tapping a low-quota local notification opens the attention-only dashboard view.
+- Tapping a low-quota local notification opens the dashboard.
 - The app icon badge is local and reflects the latest foreground refresh when the app badge setting is enabled; it is cleared, along with pending CPA alert notifications, when low-quota alerts are disabled, notification permission is unavailable, notification banners/alerts are disabled, or no saved connection is active.
 - If only app badge permission is disabled, notification alerts remain available but badge counts are cleared and omitted.
 - The launch screen uses the `LaunchBackground` named color from the asset catalog, with light and dark variants, so startup matches the app background before SwiftUI renders.
-- API key usage rows display masked keys only, and their SwiftUI identities use stable hashes rather than raw key strings.
-- Management key entry fields, dashboard server hosts, dashboard account identifiers, project IDs, API base URLs, and account-detail identifiers use SwiftUI privacy-sensitive annotations for system redaction contexts.
+- Management key entry fields, dashboard server hosts, dashboard account identifiers, project IDs, and account-detail identifiers use SwiftUI privacy-sensitive annotations for system redaction contexts.
 - Settings can copy a diagnostics report for support; it records the generation time, whether a management key exists, and the current Background App Refresh status, but never includes the key value.
 - Diagnostics also record notification authorization, alert presentation, and badge availability so local alert failures can be debugged without exposing credentials.
 - `ITSAppUsesNonExemptEncryption` is set to `false`; the app uses platform networking/security APIs and does not ship custom non-exempt encryption.

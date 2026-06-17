@@ -1249,6 +1249,12 @@ public extension CPAAccount {
         normalizedProvider == "xai" || normalizedProvider == "x-ai" || normalizedProvider == "grok"
     }
 
+    /// Codex / OpenAI accounts are the only ones exposing rolling 5-hour and 7-day
+    /// rate-limit windows, so the dashboard's 5h/7d headline average is scoped to them.
+    var isCodexLike: Bool {
+        normalizedProvider == "codex" || normalizedProvider.contains("openai")
+    }
+
     var totalRequests: Int64 {
         success + failed
     }

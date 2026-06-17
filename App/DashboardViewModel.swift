@@ -352,6 +352,26 @@ final class DashboardViewModel: ObservableObject {
             .sorted(by: attentionSort)
     }
 
+    /// All accounts grouped by provider, sorted, with no search/status/provider filtering.
+    /// Drives the simplified dashboard which mirrors the macOS menu-bar content.
+    var providerSections: [AccountProviderSection] {
+        let grouped = Dictionary(grouping: accountQuotas) { quota in
+            ProviderCatalog.info(for: quota.account.normalizedProvider).key
+        }
+        return grouped.map { key, values in
+            AccountProviderSection(
+                provider: ProviderCatalog.info(for: key),
+                accounts: values.sorted(by: accountQuotaSort)
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.provider.priority != rhs.provider.priority {
+                return lhs.provider.priority < rhs.provider.priority
+            }
+            return lhs.provider.displayName.localizedCaseInsensitiveCompare(rhs.provider.displayName) == .orderedAscending
+        }
+    }
+
     var filteredProviderSections: [AccountProviderSection] {
         let grouped = Dictionary(grouping: filteredAccountValues) { quota in
             ProviderCatalog.info(for: quota.account.normalizedProvider).key
@@ -529,6 +549,8 @@ struct DashboardSummary: Equatable {
     let quotaAccounts: Int
     let liveQuotaErrors: Int
     let attentionCount: Int
+    /// Number of Codex accounts the 5h/7d averages are based on.
+    let codexAccounts: Int
     let primaryAverage: Double?
     let weeklyAverage: Double?
     let lowestRemainingPercent: Double?
@@ -544,8 +566,12 @@ struct DashboardSummary: Equatable {
         quotaAccounts = accounts.filter { $0.usage?.hasQuotaSignal == true }.count
         liveQuotaErrors = accounts.filter { ($0.errorMessage ?? "").isEmpty == false }.count
         attentionCount = accounts.filter { $0.needsQuotaAlert(threshold: attentionThreshold) }.count
-        primaryAverage = DashboardSummary.average(accounts.compactMap(\.primaryRemainingPercent))
-        weeklyAverage = DashboardSummary.average(accounts.compactMap(\.weeklyRemainingPercent))
+        // The 5h/7d headline is a Codex-only rolling window, so average over Codex
+        // accounts exclusively and never mix in other providers' quota shapes.
+        let codexAccountList = accounts.filter { $0.account.isCodexLike }
+        codexAccounts = codexAccountList.count
+        primaryAverage = DashboardSummary.average(codexAccountList.compactMap(\.primaryRemainingPercent))
+        weeklyAverage = DashboardSummary.average(codexAccountList.compactMap(\.weeklyRemainingPercent))
         lowestRemainingPercent = accounts.compactMap(\.lowestRemainingPercent).min()
     }
 

@@ -26,7 +26,7 @@ Live quota requires the CLIProxyAPI `/v0/management/api-call` route. Some provid
 
 ### Notifications Do Not Appear
 
-Low-quota alerts are local notifications. Open iOS Settings and confirm notifications, alert presentation, badge permission, and Background App Refresh are enabled for CPA Panel. Tapping a low-quota alert opens the attention-only dashboard list. If notification permission is revoked, the app disables low-quota alerts and clears pending CPA notifications the next time it launches or enters the foreground. Background refresh timing is controlled by iOS, so open CPA Panel and refresh manually when an immediate quota update is required.
+Low-quota alerts are local notifications. Open iOS Settings and confirm notifications, alert presentation, badge permission, and Background App Refresh are enabled for CPA Panel. Tapping a low-quota alert opens the dashboard. If notification permission is revoked, the app disables low-quota alerts and clears pending CPA notifications the next time it launches or enters the foreground. Background refresh timing is controlled by iOS, so open CPA Panel and refresh manually when an immediate quota update is required.
 
 ### Support Diagnostics
 
