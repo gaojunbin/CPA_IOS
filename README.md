@@ -4,7 +4,7 @@ SwiftUI iOS client for monitoring CLIProxyAPI account status and live quota.
 
 The app mirrors the CPA macOS status bar workflow on iPhone/iPad:
 
-- Connect with a CLIProxyAPI management URL and management key.
+- Connect to one or more CLIProxyAPI services, each with its own management URL and key, and switch between them instantly from the dashboard title's dropdown (see Multiple Services).
 - Preview the finished dashboard with bundled demo data before saving any credentials, or reopen the demo from Settings later.
 - Demo mode covers Codex, Claude, Antigravity, Kimi, Grok, and a disabled Gemini account.
 - Demo account detail includes bundled model metadata and runtime badges, so review can inspect model status without a live server.
@@ -38,6 +38,17 @@ The app mirrors the CPA macOS status bar workflow on iPhone/iPad:
 - When low-quota alerts are enabled, register Background App Refresh so iOS can opportunistically refresh quota and generate local alerts while the app is not foregrounded.
 - Open the dashboard when a low-quota local notification is tapped.
 
+## Multiple Services
+
+The app can monitor multiple CLIProxyAPI services ("号池" / pools) and switch between them instantly. Services are fully independent and never share data.
+
+- The dashboard title is a dropdown switcher: tap the current service name to pick another service, or open **管理服务 (Manage services)**.
+- Add, edit, reorder, and delete services in **服务与设置 (Settings)**. Each service keeps its own server URL, management key, refresh interval, and low-quota alert settings.
+- Each service's management key is stored separately in the Keychain, keyed per service.
+- Switching shows the selected service's last-loaded data instantly, then refreshes live in the background.
+- Low-quota background alerts and the app icon badge track the currently selected service only; switching resets the local alert throttle so the new service starts clean.
+- Upgrading from a single-connection build automatically migrates your existing connection into the first service.
+
 ## Backend Requirements
 
 - CLIProxyAPI management routes must be enabled.
@@ -55,7 +66,7 @@ The app accepts a server origin such as `https://cpa.example.com`, a copied pane
 
 Open `CPA-IOS.xcodeproj` in Xcode, select the `CPA-IOS` target, set a signing team, then run on simulator or device.
 
-The app stores the management key in Keychain and keeps the server URL in `UserDefaults`.
+The app stores each service's management key in Keychain (keyed per service) and keeps the service list and current selection in `UserDefaults`.
 The demo dashboard is non-persistent, can be opened from first setup or Settings, and does not save a server URL or management key.
 Low-quota notifications are local device notifications and are only enabled after the user grants notification permission in Settings.
 The first connection setup does not inherit stale alert defaults; low-quota alerts must be enabled from Settings after a connection exists.

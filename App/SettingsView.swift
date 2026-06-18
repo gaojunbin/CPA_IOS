@@ -3,97 +3,57 @@ import SwiftUI
 import UIKit
 #endif
 
+/// Top-level "服务与设置" screen: lists every configured service, lets you add one, and
+/// hosts the global (non-per-service) support + notification status.
 struct SettingsView: View {
     @EnvironmentObject private var connectionStore: ConnectionStore
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
     var onPreview: (() -> Void)?
 
-    @State private var baseURL = ""
-    @State private var managementKey = ""
-    @State private var refreshMinutes = 5.0
-    @State private var quotaAlertsEnabled = false
-    @State private var quotaAlertThreshold = 15.0
-    @State private var quotaAlertShowsAccountNames = false
-    @State private var errorMessage: String?
-    @State private var notificationPermissionDenied = false
+    @State private var showsAddService = false
     @State private var notificationCapabilitySummary: NotificationCapabilitySummary?
-    @State private var confirmsClearConnection = false
-    @State private var isChecking = false
     @State private var diagnosticsCopied = false
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("连接") {
-                    TextField("服务器", text: $baseURL)
-                        #if os(iOS)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        #endif
-                        .privacySensitive()
-                    SecureField("管理密钥，留空保持当前密钥", text: $managementKey)
-                        .textContentType(.password)
-                        .privacySensitive()
-
-                    if showsHTTPWarning {
-                        Label("当前连接使用 HTTP，请只在可信网络中使用。", systemImage: "lock.open.fill")
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
+                Section {
+                    ForEach(connectionStore.profiles) { profile in
+                        NavigationLink {
+                            ServiceEditorView(mode: .edit(profile))
+                        } label: {
+                            ServiceListRow(
+                                profile: profile,
+                                isSelected: profile.id == connectionStore.selectedID
+                            )
+                        }
                     }
-                }
-
-                Section("刷新") {
-                    Stepper(value: $refreshMinutes, in: 1...1440, step: 1) {
-                        SettingsValueRow(
-                            title: "自动刷新",
-                            value: "\(Int(refreshMinutes)) 分钟",
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
+                    .onMove { connectionStore.moveProfiles(fromOffsets: $0, toOffset: $1) }
+                    .onDelete { offsets in
+                        let ids = offsets.map { connectionStore.profiles[$0].id }
+                        ids.forEach { connectionStore.removeProfile($0) }
                     }
+
+                    Button {
+                        showsAddService = true
+                    } label: {
+                        Label("添加服务", systemImage: "plus.circle.fill")
+                    }
+                } header: {
+                    Text("服务")
+                } footer: {
+                    Text("每个服务相互独立：各自的服务器、管理密钥、刷新与提醒设置。点按编辑，左滑删除。")
                 }
 
                 Section("提醒") {
-                    Stepper(value: $quotaAlertThreshold, in: 1...50, step: 1) {
-                        SettingsValueRow(
-                            title: "关注阈值",
-                            value: "\(Int(quotaAlertThreshold))%",
-                            systemImage: "percent"
-                        )
-                    }
-
                     SettingsValueRow(
                         title: "通知权限",
                         value: notificationCapabilitySummary?.localizedStatusText ?? "读取中",
                         systemImage: "bell.badge.fill"
                     )
-
-                    Toggle(isOn: $quotaAlertsEnabled) {
-                        Label("低额度提醒", systemImage: "bell.badge.fill")
-                    }
-                    if quotaAlertsEnabled {
-                        Toggle(isOn: $quotaAlertShowsAccountNames) {
-                            Label("通知显示账号名称", systemImage: "eye.fill")
-                        }
-                        SettingsValueRow(
-                            title: "后台刷新",
-                            value: backgroundRefreshStatusText,
-                            systemImage: "arrow.clockwise.icloud"
-                        )
-                        if let warning = backgroundRefreshWarningText {
-                            Label(warning, systemImage: "exclamationmark.triangle.fill")
-                                .font(.footnote)
-                                .foregroundStyle(.orange)
-                            #if os(iOS)
-                            Button {
-                                openAppSettings()
-                            } label: {
-                                Label("打开应用设置", systemImage: "gearshape.fill")
-                            }
-                            #endif
-                        }
-                    }
+                    Text("低额度后台提醒仅监控当前选中的服务。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("支持") {
@@ -107,9 +67,7 @@ struct SettingsView: View {
                     }
 
                     Button {
-                        Task {
-                            await copyDiagnostics()
-                        }
+                        Task { await copyDiagnostics() }
                     } label: {
                         Label("复制诊断信息", systemImage: "doc.on.doc.fill")
                     }
@@ -120,41 +78,8 @@ struct SettingsView: View {
                             .foregroundStyle(.green)
                     }
                 }
-
-                if let errorMessage {
-                    Section {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(notificationPermissionDenied ? .orange : .red)
-                        #if os(iOS)
-                        if notificationPermissionDenied {
-                            Button {
-                                openSystemNotificationSettings()
-                            } label: {
-                                Label("打开通知设置", systemImage: "gearshape.fill")
-                            }
-                        }
-                        #endif
-                    }
-                }
-
-                Section {
-                    Button {
-                        Task {
-                            await save()
-                        }
-                    } label: {
-                        Label(isChecking ? "验证中" : "保存并验证", systemImage: "checkmark.circle.fill")
-                    }
-                    .disabled(!canSave)
-
-                    Button(role: .destructive) {
-                        confirmsClearConnection = true
-                    } label: {
-                        Label("清除连接", systemImage: "trash.fill")
-                    }
-                }
             }
-            .navigationTitle("设置")
+            .navigationTitle("服务与设置")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -162,37 +87,295 @@ struct SettingsView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("完成") { dismiss() }
                 }
-            }
-            .onAppear {
-                loadStoredSettings()
+                #if os(iOS)
+                ToolbarItem(placement: .primaryAction) {
+                    if !connectionStore.profiles.isEmpty {
+                        EditButton()
+                    }
+                }
+                #endif
             }
             .task {
-                let disabledAlerts = await connectionStore.reconcileQuotaAlertAuthorization()
+                await connectionStore.reconcileQuotaAlertAuthorization()
                 await refreshNotificationCapabilitySummary()
-                if disabledAlerts {
-                    loadStoredSettings()
-                    notificationPermissionDenied = true
-                    errorMessage = "通知权限不可用，低额度提醒已关闭"
-                }
             }
-            .confirmationDialog("清除连接？", isPresented: $confirmsClearConnection, titleVisibility: .visible) {
-                Button("清除连接", role: .destructive) {
-                    connectionStore.clear()
-                    dismiss()
+            .sheet(isPresented: $showsAddService) {
+                NavigationStack {
+                    ServiceEditorView(mode: .add)
                 }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("这会删除本机保存的服务器地址、刷新设置和 Keychain 管理密钥。")
+                .environmentObject(connectionStore)
             }
         }
     }
 
-    private func loadStoredSettings() {
-        baseURL = connectionStore.connection?.baseURL.absoluteString ?? connectionStore.lastBaseURLString
-        refreshMinutes = max(1, (connectionStore.refreshIntervalSeconds / 60).rounded())
-        quotaAlertsEnabled = connectionStore.quotaAlertsEnabled
-        quotaAlertThreshold = connectionStore.quotaAlertThreshold
-        quotaAlertShowsAccountNames = connectionStore.quotaAlertShowsAccountNames
+    @MainActor
+    private func copyDiagnostics() async {
+        await refreshNotificationCapabilitySummary()
+        #if os(iOS)
+        UIPasteboard.general.string = supportDiagnostics()
+        #endif
+        diagnosticsCopied = true
+    }
+
+    private func supportDiagnostics() -> String {
+        var lines = [
+            "CPA Panel Diagnostics",
+            "Generated At: \(ISO8601DateFormatter().string(from: Date()))",
+            "App Version: \(bundleValue("CFBundleShortVersionString"))",
+            "Build: \(bundleValue("CFBundleVersion"))",
+            "Service Count: \(connectionStore.profiles.count)",
+            "Selected Service: \(connectionStore.connection?.displayHost ?? "none")"
+        ]
+        for (index, profile) in connectionStore.profiles.enumerated() {
+            let host = (try? CPABaseURLNormalizer.normalize(profile.baseURLString))?.host ?? "invalid"
+            let selected = profile.id == connectionStore.selectedID ? " (selected)" : ""
+            let minutes = Int((profile.refreshIntervalSeconds / 60).rounded())
+            lines.append("Service #\(index + 1)\(selected): host=\(host) refresh=\(minutes)min alerts=\(profile.quotaAlertsEnabled ? "on" : "off")")
+        }
+        lines.append(notificationCapabilitySummary?.diagnosticsLines.joined(separator: "\n") ?? "Notification Status: unknown")
+        lines.append("Management Key Included: no")
+        return lines.joined(separator: "\n")
+    }
+
+    private func bundleValue(_ key: String) -> String {
+        Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "unknown"
+    }
+
+    @MainActor
+    private func refreshNotificationCapabilitySummary() async {
+        notificationCapabilitySummary = await QuotaAlertNotifier.currentCapabilitySummary()
+    }
+}
+
+struct ServiceListRow: View {
+    let profile: ServiceProfile
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(profile.name)
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
+                Text(profile.displayHost)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .privacySensitive()
+            }
+
+            Spacer(minLength: 8)
+
+            if profile.quotaAlertsEnabled {
+                Image(systemName: "bell.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(profile.name)，\(profile.displayHost)\(isSelected ? "，当前服务" : "")")
+    }
+}
+
+enum ServiceEditorMode {
+    case add
+    case edit(ServiceProfile)
+
+    var isEditing: Bool {
+        if case .edit = self { return true }
+        return false
+    }
+
+    var profile: ServiceProfile? {
+        if case let .edit(profile) = self { return profile }
+        return nil
+    }
+}
+
+/// The per-service form (name, server, key, refresh interval, low-quota alerts). Used both
+/// for adding a new service and editing an existing one. Pushed for edit, presented as a
+/// sheet for add.
+struct ServiceEditorView: View {
+    @EnvironmentObject private var connectionStore: ConnectionStore
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    let mode: ServiceEditorMode
+
+    @State private var name = ""
+    @State private var baseURL = ""
+    @State private var managementKey = ""
+    @State private var refreshMinutes = 5.0
+    @State private var quotaAlertsEnabled = false
+    @State private var quotaAlertThreshold = 15.0
+    @State private var quotaAlertShowsAccountNames = false
+    @State private var errorMessage: String?
+    @State private var notificationPermissionDenied = false
+    @State private var isChecking = false
+    @State private var confirmsDelete = false
+    @State private var didLoad = false
+
+    var body: some View {
+        Form {
+            Section("连接") {
+                TextField("名称", text: $name)
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    #endif
+                TextField("服务器", text: $baseURL)
+                    #if os(iOS)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    #endif
+                    .privacySensitive()
+                SecureField(keyPlaceholder, text: $managementKey)
+                    .textContentType(.password)
+                    .privacySensitive()
+
+                if showsHTTPWarning {
+                    Label("当前连接使用 HTTP，请只在可信网络中使用。", systemImage: "lock.open.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            Section("刷新") {
+                Stepper(value: $refreshMinutes, in: 1...1440, step: 1) {
+                    SettingsValueRow(
+                        title: "自动刷新",
+                        value: "\(Int(refreshMinutes)) 分钟",
+                        systemImage: "arrow.triangle.2.circlepath"
+                    )
+                }
+            }
+
+            Section("提醒") {
+                Stepper(value: $quotaAlertThreshold, in: 1...50, step: 1) {
+                    SettingsValueRow(
+                        title: "关注阈值",
+                        value: "\(Int(quotaAlertThreshold))%",
+                        systemImage: "percent"
+                    )
+                }
+
+                Toggle(isOn: $quotaAlertsEnabled) {
+                    Label("低额度提醒", systemImage: "bell.badge.fill")
+                }
+                if quotaAlertsEnabled {
+                    Toggle(isOn: $quotaAlertShowsAccountNames) {
+                        Label("通知显示账号名称", systemImage: "eye.fill")
+                    }
+                    #if os(iOS)
+                    SettingsValueRow(
+                        title: "后台刷新",
+                        value: backgroundRefreshStatusText,
+                        systemImage: "arrow.clockwise.icloud"
+                    )
+                    if let warning = backgroundRefreshWarningText {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                        Button {
+                            openAppSettings()
+                        } label: {
+                            Label("打开应用设置", systemImage: "gearshape.fill")
+                        }
+                    }
+                    #endif
+                }
+            }
+
+            if let errorMessage {
+                Section {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(notificationPermissionDenied ? .orange : .red)
+                    #if os(iOS)
+                    if notificationPermissionDenied {
+                        Button {
+                            openSystemNotificationSettings()
+                        } label: {
+                            Label("打开通知设置", systemImage: "gearshape.fill")
+                        }
+                    }
+                    #endif
+                }
+            }
+
+            Section {
+                Button {
+                    Task { await save() }
+                } label: {
+                    Label(isChecking ? "验证中" : "保存并验证", systemImage: "checkmark.circle.fill")
+                }
+                .disabled(!canSave)
+
+                if let profile = mode.profile {
+                    if profile.id != connectionStore.selectedID {
+                        Button {
+                            connectionStore.selectProfile(profile.id)
+                            dismiss()
+                        } label: {
+                            Label("设为当前服务", systemImage: "checkmark.circle")
+                        }
+                    }
+                    Button(role: .destructive) {
+                        confirmsDelete = true
+                    } label: {
+                        Label("删除服务", systemImage: "trash.fill")
+                    }
+                }
+            }
+        }
+        .navigationTitle(mode.isEditing ? "编辑服务" : "添加服务")
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
+        .toolbar {
+            if !mode.isEditing {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+            }
+        }
+        .onAppear { loadIfNeeded() }
+        .confirmationDialog("删除该服务？", isPresented: $confirmsDelete, titleVisibility: .visible) {
+            Button("删除服务", role: .destructive) {
+                if let profile = mode.profile {
+                    connectionStore.removeProfile(profile.id)
+                }
+                dismiss()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("这会删除该服务保存的服务器地址、刷新设置和 Keychain 管理密钥。其它服务不受影响。")
+        }
+    }
+
+    private var keyPlaceholder: String {
+        mode.isEditing ? "管理密钥，留空保持当前密钥" : "Management key"
+    }
+
+    private func loadIfNeeded() {
+        guard !didLoad else { return }
+        didLoad = true
+        guard let profile = mode.profile else {
+            refreshMinutes = 5
+            quotaAlertThreshold = 15
+            return
+        }
+        name = profile.name
+        baseURL = profile.baseURLString
+        refreshMinutes = max(1, (profile.refreshIntervalSeconds / 60).rounded())
+        quotaAlertsEnabled = profile.quotaAlertsEnabled
+        quotaAlertThreshold = profile.quotaAlertThreshold
+        quotaAlertShowsAccountNames = profile.quotaAlertShowsAccountNames
     }
 
     private func save() async {
@@ -202,57 +385,74 @@ struct SettingsView: View {
         do {
             let normalizedURL = try CPABaseURLNormalizer.normalize(baseURL)
             let keyInput = managementKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            let key = keyInput.isEmpty ? connectionStore.connection?.managementKey ?? "" : keyInput
-            guard !key.isEmpty else {
+            let effectiveKey: String
+            if !keyInput.isEmpty {
+                effectiveKey = keyInput
+            } else if let id = mode.profile?.id,
+                      let existing = connectionStore.managementKey(for: id), !existing.isEmpty {
+                effectiveKey = existing
+            } else {
                 throw ConnectionError.emptyManagementKey
             }
-            let client = CPAClient(baseURL: normalizedURL, managementKey: key)
+
+            let client = CPAClient(baseURL: normalizedURL, managementKey: effectiveKey)
             _ = try await client.fetchDashboard(includeLiveUsage: false)
+
             var savedAlertsEnabled = quotaAlertsEnabled
-            var savedAlertShowsAccountNames = quotaAlertShowsAccountNames
+            var savedShowsNames = quotaAlertShowsAccountNames
             if quotaAlertsEnabled {
                 do {
                     let authorized = try await QuotaAlertNotifier.requestAuthorization()
-                    let canSendAlerts = authorized ? await QuotaAlertNotifier.canSendAlerts() : false
-                    if !canSendAlerts {
+                    let canSend = authorized ? await QuotaAlertNotifier.canSendAlerts() : false
+                    if !canSend {
                         savedAlertsEnabled = false
-                        savedAlertShowsAccountNames = false
+                        savedShowsNames = false
                         quotaAlertsEnabled = false
                         quotaAlertShowsAccountNames = false
                         notificationPermissionDenied = true
-                        errorMessage = "连接和刷新设置已保存；请允许通知后再开启低额度提醒"
+                        errorMessage = "连接已验证；请允许通知后再开启低额度提醒"
                     }
                 } catch {
                     savedAlertsEnabled = false
-                    savedAlertShowsAccountNames = false
+                    savedShowsNames = false
                     quotaAlertsEnabled = false
                     quotaAlertShowsAccountNames = false
                     notificationPermissionDenied = true
-                    errorMessage = "连接和刷新设置已保存；通知设置暂不可用，低额度提醒已关闭"
+                    errorMessage = "连接已验证；通知设置暂不可用，低额度提醒已关闭"
                 }
             }
-            await refreshNotificationCapabilitySummary()
-            try connectionStore.save(
-                baseURLString: normalizedURL.absoluteString,
-                managementKey: key,
-                refreshIntervalSeconds: refreshMinutes * 60,
-                quotaAlertsEnabled: savedAlertsEnabled,
-                quotaAlertThreshold: quotaAlertThreshold,
-                quotaAlertShowsAccountNames: savedAlertShowsAccountNames
-            )
-            managementKey = ""
-            loadStoredSettings()
+
+            switch mode {
+            case .add:
+                try connectionStore.addProfile(
+                    name: name,
+                    baseURLString: normalizedURL.absoluteString,
+                    managementKey: effectiveKey,
+                    refreshIntervalSeconds: refreshMinutes * 60,
+                    quotaAlertsEnabled: savedAlertsEnabled,
+                    quotaAlertThreshold: quotaAlertThreshold,
+                    quotaAlertShowsAccountNames: savedShowsNames
+                )
+            case let .edit(profile):
+                try connectionStore.updateProfile(
+                    id: profile.id,
+                    name: name,
+                    baseURLString: normalizedURL.absoluteString,
+                    managementKey: keyInput.isEmpty ? nil : keyInput,
+                    refreshIntervalSeconds: refreshMinutes * 60,
+                    quotaAlertsEnabled: savedAlertsEnabled,
+                    quotaAlertThreshold: quotaAlertThreshold,
+                    quotaAlertShowsAccountNames: savedShowsNames
+                )
+            }
+
             if notificationPermissionDenied {
                 isChecking = false
+                managementKey = ""
                 return
             }
             dismiss()
         } catch {
-            if case ConnectionError.notificationPermissionDenied = error {
-                notificationPermissionDenied = true
-            } else {
-                notificationPermissionDenied = false
-            }
             errorMessage = displayErrorMessage(error.localizedDescription, limit: 180)
         }
         isChecking = false
@@ -261,7 +461,12 @@ struct SettingsView: View {
     private var canSave: Bool {
         let hasURL = !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasKeyInput = !managementKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let hasStoredKey = connectionStore.connection?.managementKey.isEmpty == false
+        let hasStoredKey: Bool
+        if let id = mode.profile?.id {
+            hasStoredKey = connectionStore.managementKey(for: id)?.isEmpty == false
+        } else {
+            hasStoredKey = false
+        }
         return !isChecking && hasURL && (hasKeyInput || hasStoredKey)
     }
 
@@ -272,71 +477,9 @@ struct SettingsView: View {
         return normalizedURL.scheme == "http"
     }
 
-    @MainActor
-    private func copyDiagnostics() async {
-        await refreshNotificationCapabilitySummary()
-        let diagnostics = supportDiagnostics()
-        #if os(iOS)
-        UIPasteboard.general.string = diagnostics
-        #endif
-        diagnosticsCopied = true
-    }
-
-    private func supportDiagnostics() -> String {
-        let currentConnection = connectionStore.connection
-        let diagnosticURL = currentConnection?.baseURL ?? (try? CPABaseURLNormalizer.normalize(baseURL))
-        let version = bundleValue("CFBundleShortVersionString")
-        let build = bundleValue("CFBundleVersion")
-        let hasStoredKey = currentConnection?.managementKey.isEmpty == false
-        let hasPendingKey = !managementKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-
-        return [
-            "CPA Panel Diagnostics",
-            "Generated At: \(diagnosticsTimestamp())",
-            "App Version: \(version)",
-            "Build: \(build)",
-            "Connection Configured: \(currentConnection == nil ? "no" : "yes")",
-            "Server URL: \(redactedURLString(diagnosticURL))",
-            "Refresh Interval Minutes: \(Int(refreshMinutes.rounded()))",
-            "Low Quota Alerts Enabled: \(quotaAlertsEnabled ? "yes" : "no")",
-            "Attention Threshold: \(Int(quotaAlertThreshold.rounded()))%",
-            "Detailed Notification Text: \(quotaAlertShowsAccountNames ? "yes" : "no")",
-            "Background Refresh Status: \(backgroundRefreshStatusDiagnosticsText)",
-            notificationCapabilitySummary?.diagnosticsLines.joined(separator: "\n") ?? "Notification Status: unknown",
-            "Stored Management Key Present: \(hasStoredKey ? "yes" : "no")",
-            "Unsaved Management Key Present: \(hasPendingKey ? "yes" : "no")",
-            "Management Key Included: no"
-        ].joined(separator: "\n")
-    }
-
-    private func redactedURLString(_ url: URL?) -> String {
-        guard let url else {
-            return "none"
-        }
-        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            return url.absoluteString
-        }
-        components.user = nil
-        components.password = nil
-        return components.url?.absoluteString ?? url.absoluteString
-    }
-
-    private func bundleValue(_ key: String) -> String {
-        Bundle.main.object(forInfoDictionaryKey: key) as? String ?? "unknown"
-    }
-
-    private func diagnosticsTimestamp() -> String {
-        ISO8601DateFormatter().string(from: Date())
-    }
-
-    @MainActor
-    private func refreshNotificationCapabilitySummary() async {
-        notificationCapabilitySummary = await QuotaAlertNotifier.currentCapabilitySummary()
-    }
-
+    #if os(iOS)
     @MainActor
     private var backgroundRefreshStatusText: String {
-        #if os(iOS)
         switch UIApplication.shared.backgroundRefreshStatus {
         case .available:
             return "可用"
@@ -347,32 +490,10 @@ struct SettingsView: View {
         @unknown default:
             return "未知"
         }
-        #else
-        return "不可用"
-        #endif
-    }
-
-    @MainActor
-    private var backgroundRefreshStatusDiagnosticsText: String {
-        #if os(iOS)
-        switch UIApplication.shared.backgroundRefreshStatus {
-        case .available:
-            return "available"
-        case .denied:
-            return "denied"
-        case .restricted:
-            return "restricted"
-        @unknown default:
-            return "unknown"
-        }
-        #else
-        return "unavailable"
-        #endif
     }
 
     @MainActor
     private var backgroundRefreshWarningText: String? {
-        #if os(iOS)
         switch UIApplication.shared.backgroundRefreshStatus {
         case .available:
             return nil
@@ -383,12 +504,8 @@ struct SettingsView: View {
         @unknown default:
             return "无法确认后台刷新状态，低额度提醒仍可在前台刷新后触发。"
         }
-        #else
-        return nil
-        #endif
     }
 
-    #if os(iOS)
     @MainActor
     private func openAppSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else {

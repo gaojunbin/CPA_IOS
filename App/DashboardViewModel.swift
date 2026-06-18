@@ -3,7 +3,15 @@ import Foundation
 
 @MainActor
 final class DashboardViewModel: ObservableObject {
-    @Published private(set) var snapshot: ManagementDashboard?
+    @Published private(set) var snapshot: ManagementDashboard? {
+        didSet {
+            // Cache the latest snapshot per service so switching back to one shows its
+            // last data instantly instead of a spinner.
+            if let id = activeConnection?.id, let snapshot {
+                snapshotCache[id] = snapshot
+            }
+        }
+    }
     @Published private(set) var isLoading = false
     @Published private(set) var isSyncingLiveUsage = false
     @Published private(set) var liveUsageCompleted = 0
@@ -18,6 +26,7 @@ final class DashboardViewModel: ObservableObject {
     private var refreshGeneration = 0
     private let liveUsageBatchSize = 6
     private var activeConnection: SavedConnection?
+    private var snapshotCache: [UUID: ManagementDashboard] = [:]
     private var refreshTask: Task<Void, Never>?
     private var liveUsageTask: Task<Void, Never>?
     private var attentionThreshold = 35.0
@@ -57,13 +66,23 @@ final class DashboardViewModel: ObservableObject {
             return refreshTask
         }
         attentionThreshold = connection.quotaAlertThreshold
-        let previousSnapshot = isSameTarget ? snapshot : nil
-        if !isSameTarget {
-            clearFilters()
-        }
         refreshTask?.cancel()
         liveUsageTask?.cancel()
+        let previousSnapshot: ManagementDashboard?
+        if isSameTarget {
+            previousSnapshot = snapshot
+        } else {
+            clearFilters()
+            previousSnapshot = snapshotCache[connection.id]
+        }
+        // Set the active connection before touching `snapshot` so the cache write in its
+        // didSet lands under the correct service id.
         activeConnection = connection
+        if !isSameTarget {
+            // Instantly show the newly selected service's cached snapshot (may be nil) while
+            // the live refresh runs underneath — this is what makes switching feel seamless.
+            snapshot = previousSnapshot
+        }
         refreshGeneration += 1
         let generation = refreshGeneration
         let task = Task { [weak self] in
@@ -80,7 +99,8 @@ final class DashboardViewModel: ObservableObject {
         guard let activeConnection else {
             return false
         }
-        return activeConnection.baseURL == connection.baseURL &&
+        return activeConnection.id == connection.id &&
+            activeConnection.baseURL == connection.baseURL &&
             activeConnection.managementKey == connection.managementKey
     }
 

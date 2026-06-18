@@ -37,6 +37,7 @@ struct ConnectionSetupView: View {
     @EnvironmentObject private var connectionStore: ConnectionStore
     let onPreview: () -> Void
 
+    @State private var name = ""
     @State private var baseURL = ""
     @State private var managementKey = ""
     @State private var isConnecting = false
@@ -74,6 +75,15 @@ struct ConnectionSetupView: View {
                         .padding(.top, 28)
 
                         VStack(spacing: 14) {
+                            InputField(
+                                title: "名称（可选）",
+                                systemImage: "tag",
+                                placeholder: "例如：美国号池",
+                                text: $name,
+                                isSecure: false,
+                                isSensitive: false
+                            )
+
                             InputField(
                                 title: "服务器",
                                 systemImage: "link",
@@ -164,7 +174,11 @@ struct ConnectionSetupView: View {
             }
             let client = CPAClient(baseURL: normalizedURL, managementKey: key)
             _ = try await client.fetchDashboard(includeLiveUsage: false)
-            try connectionStore.save(baseURLString: normalizedURL.absoluteString, managementKey: key)
+            try connectionStore.addProfile(
+                name: name,
+                baseURLString: normalizedURL.absoluteString,
+                managementKey: key
+            )
         } catch {
             errorMessage = displayErrorMessage(error.localizedDescription, limit: 180)
         }

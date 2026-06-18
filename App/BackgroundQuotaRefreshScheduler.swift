@@ -69,7 +69,7 @@ enum BackgroundQuotaRefreshScheduler {
 
     private static func refreshAndNotify(using connection: SavedConnection) async -> Bool {
         guard await QuotaAlertNotifier.canSendAlerts() else {
-            ConnectionStorage.disableQuotaAlerts()
+            ConnectionStorage.disableQuotaAlertsForSelected()
             QuotaAlertNotifier.resetAlertHistory()
             cancel()
             return true

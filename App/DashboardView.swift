@@ -27,41 +27,12 @@ struct DashboardView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        Task {
-                            if previewSnapshot != nil {
-                                viewModel.showPreview(
-                                    ManagementDashboard.demo(fetchedAt: Date()),
-                                    attentionThreshold: connection.quotaAlertThreshold
-                                )
-                            } else {
-                                await viewModel.refreshAndWait(using: connection, force: true)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .disabled(viewModel.isBusy)
-                    .accessibilityLabel("刷新")
+                ToolbarItem(placement: .principal) {
+                    principalView
                 }
-
-                ToolbarItem(placement: .secondaryAction) {
-                    if let onClosePreview {
-                        Button {
-                            onClosePreview()
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                        }
-                        .accessibilityLabel("退出演示")
-                    } else {
-                        Button {
-                            showsSettings = true
-                        } label: {
-                            Image(systemName: "gearshape.fill")
-                        }
-                        .accessibilityLabel("设置")
-                    }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    refreshButton
+                    trailingSecondaryButton
                 }
             }
             .task(id: connection) {
@@ -108,6 +79,86 @@ struct DashboardView: View {
         }
         .onDisappear {
             viewModel.cancelRefresh()
+        }
+    }
+
+    @ViewBuilder private var principalView: some View {
+        if previewSnapshot != nil {
+            Text("演示面板").font(.headline)
+        } else if connectionStore.hasProfiles {
+            serviceSwitcher
+        } else {
+            Text("CPA 面板").font(.headline)
+        }
+    }
+
+    private var serviceSwitcher: some View {
+        Menu {
+            ForEach(connectionStore.profiles) { profile in
+                Button {
+                    connectionStore.selectProfile(profile.id)
+                } label: {
+                    if profile.id == connectionStore.selectedID {
+                        Label(profile.name, systemImage: "checkmark")
+                    } else {
+                        Text(profile.name)
+                    }
+                }
+            }
+            Divider()
+            Button {
+                showsSettings = true
+            } label: {
+                Label("管理服务…", systemImage: "slider.horizontal.3")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(connection.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+            }
+            .foregroundStyle(.primary)
+        }
+        .accessibilityLabel("切换服务，当前 \(connection.name)")
+    }
+
+    @ViewBuilder private var refreshButton: some View {
+        Button {
+            Task {
+                if previewSnapshot != nil {
+                    viewModel.showPreview(
+                        ManagementDashboard.demo(fetchedAt: Date()),
+                        attentionThreshold: connection.quotaAlertThreshold
+                    )
+                } else {
+                    await viewModel.refreshAndWait(using: connection, force: true)
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.clockwise")
+        }
+        .disabled(viewModel.isBusy)
+        .accessibilityLabel("刷新")
+    }
+
+    @ViewBuilder private var trailingSecondaryButton: some View {
+        if let onClosePreview {
+            Button {
+                onClosePreview()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .accessibilityLabel("退出演示")
+        } else {
+            Button {
+                showsSettings = true
+            } label: {
+                Image(systemName: "gearshape.fill")
+            }
+            .accessibilityLabel("设置")
         }
     }
 
