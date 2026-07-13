@@ -243,7 +243,7 @@ public struct ManagementDashboard: Equatable, Sendable {
                 weekly: nil,
                 additionalWindows: [
                     QuotaWindow(
-                        id: "demo-claude-5h",
+                        id: "claude-five-hour",
                         label: "5 小时限额",
                         usedPercent: 72,
                         remainingPercent: 28,
@@ -253,7 +253,7 @@ public struct ManagementDashboard: Equatable, Sendable {
                         isUsable: true
                     ),
                     QuotaWindow(
-                        id: "demo-claude-7d",
+                        id: "claude-seven-day",
                         label: "7 天 Sonnet",
                         usedPercent: 41,
                         remainingPercent: 59,
@@ -272,26 +272,48 @@ public struct ManagementDashboard: Equatable, Sendable {
                 weekly: nil,
                 additionalWindows: [
                     QuotaWindow(
-                        id: "demo-antigravity-claude",
-                        label: "Claude/GPT",
+                        id: "antigravity-claude-gpt-5h",
+                        label: "Claude/GPT · 5h",
                         usedPercent: 16,
                         remainingPercent: 84,
                         resetAfterSeconds: nil,
                         resetAt: nil,
                         displayValue: "84%",
-                        detailText: "05-31 09:00",
+                        detailText: "5h · 05-31 09:00",
                         isUsable: true
                     ),
                     QuotaWindow(
-                        id: "demo-antigravity-gemini",
-                        label: "Gemini 3 Pro",
+                        id: "antigravity-claude-gpt-weekly",
+                        label: "Claude/GPT · Weekly",
+                        usedPercent: 37,
+                        remainingPercent: 63,
+                        resetAfterSeconds: nil,
+                        resetAt: nil,
+                        displayValue: "63%",
+                        detailText: "weekly · 06-05 09:00",
+                        isUsable: true
+                    ),
+                    QuotaWindow(
+                        id: "antigravity-gemini-5h",
+                        label: "Gemini · 5h",
                         usedPercent: 100,
                         remainingPercent: 0,
                         resetAfterSeconds: nil,
                         resetAt: nil,
                         displayValue: "0%",
-                        detailText: "05-31 15:00",
+                        detailText: "5h · 05-31 15:00",
                         isUsable: false
+                    ),
+                    QuotaWindow(
+                        id: "antigravity-gemini-weekly",
+                        label: "Gemini · Weekly",
+                        usedPercent: 48,
+                        remainingPercent: 52,
+                        resetAfterSeconds: nil,
+                        resetAt: nil,
+                        displayValue: "52%",
+                        detailText: "weekly · 06-05 15:00",
+                        isUsable: true
                     )
                 ],
                 rawStatus: "demo"
@@ -303,7 +325,17 @@ public struct ManagementDashboard: Equatable, Sendable {
                 weekly: nil,
                 additionalWindows: [
                     QuotaWindow(
-                        id: "demo-xai-monthly",
+                        id: "xai-weekly-credits",
+                        label: "周积分",
+                        usedPercent: 31,
+                        remainingPercent: 69,
+                        resetAfterSeconds: nil,
+                        resetAt: nil,
+                        displayValue: "69%",
+                        isUsable: true
+                    ),
+                    QuotaWindow(
+                        id: "xai-monthly-credits",
                         label: "月度积分",
                         usedPercent: 22,
                         remainingPercent: 78,
@@ -492,6 +524,13 @@ public struct CPAModelDefinition: Decodable, Identifiable, Equatable, Sendable {
     public let displayName: String?
     public let type: String?
     public let ownedBy: String?
+    public let description: String?
+    public let contextLength: Int?
+    public let maxCompletionTokens: Int?
+    public let supportedInputModalities: [String]
+    public let supportedOutputModalities: [String]
+    public let supportsWebSearch: Bool?
+    public let thinking: ModelThinkingCapabilities?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -500,6 +539,26 @@ public struct CPAModelDefinition: Decodable, Identifiable, Equatable, Sendable {
         case type
         case ownedBy = "owned_by"
         case ownedByCamel = "ownedBy"
+        case description
+        case contextLength = "context_length"
+        case contextLengthCamel = "contextLength"
+        case inputTokenLimit = "input_token_limit"
+        case inputTokenLimitCamel = "inputTokenLimit"
+        case maxCompletionTokens = "max_completion_tokens"
+        case maxCompletionTokensCamel = "maxCompletionTokens"
+        case outputTokenLimit = "output_token_limit"
+        case outputTokenLimitCamel = "outputTokenLimit"
+        case supportedInputModalities = "supported_input_modalities"
+        case supportedInputModalitiesCamel = "supportedInputModalities"
+        case inputModalities = "input_modalities"
+        case inputModalitiesCamel = "inputModalities"
+        case supportedOutputModalities = "supported_output_modalities"
+        case supportedOutputModalitiesCamel = "supportedOutputModalities"
+        case outputModalities = "output_modalities"
+        case outputModalitiesCamel = "outputModalities"
+        case supportsWebSearch = "supports_web_search"
+        case supportsWebSearchCamel = "supportsWebSearch"
+        case thinking
     }
 
     public init(from decoder: Decoder) throws {
@@ -514,13 +573,132 @@ public struct CPAModelDefinition: Decodable, Identifiable, Equatable, Sendable {
             try container.decodeFlexibleStringIfPresent(forKey: .ownedBy),
             try container.decodeFlexibleStringIfPresent(forKey: .ownedByCamel)
         )
+        description = try container.decodeFlexibleStringIfPresent(forKey: .description)
+        contextLength = try container.decodeFlexibleIntIfPresent(forKey: .contextLength)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .contextLengthCamel)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .inputTokenLimit)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .inputTokenLimitCamel)
+        maxCompletionTokens = try container.decodeFlexibleIntIfPresent(forKey: .maxCompletionTokens)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .maxCompletionTokensCamel)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .outputTokenLimit)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .outputTokenLimitCamel)
+        supportedInputModalities = Self.firstNonEmptyArray(
+            try container.decodeFlexibleStringArrayIfPresent(forKey: .supportedInputModalities),
+            try container.decodeFlexibleStringArrayIfPresent(forKey: .supportedInputModalitiesCamel),
+            try container.decodeFlexibleStringArrayIfPresent(forKey: .inputModalities),
+            try container.decodeFlexibleStringArrayIfPresent(forKey: .inputModalitiesCamel)
+        )
+        supportedOutputModalities = Self.firstNonEmptyArray(
+            try container.decodeFlexibleStringArrayIfPresent(forKey: .supportedOutputModalities),
+            try container.decodeFlexibleStringArrayIfPresent(forKey: .supportedOutputModalitiesCamel),
+            try container.decodeFlexibleStringArrayIfPresent(forKey: .outputModalities),
+            try container.decodeFlexibleStringArrayIfPresent(forKey: .outputModalitiesCamel)
+        )
+        supportsWebSearch = try container.decodeFlexibleBoolIfPresent(forKey: .supportsWebSearch)
+            ?? container.decodeFlexibleBoolIfPresent(forKey: .supportsWebSearchCamel)
+        thinking = try? container.decodeIfPresent(ModelThinkingCapabilities.self, forKey: .thinking)
     }
 
-    public init(id: String, displayName: String? = nil, type: String? = nil, ownedBy: String? = nil) {
+    public init(
+        id: String,
+        displayName: String? = nil,
+        type: String? = nil,
+        ownedBy: String? = nil,
+        description: String? = nil,
+        contextLength: Int? = nil,
+        maxCompletionTokens: Int? = nil,
+        supportedInputModalities: [String] = [],
+        supportedOutputModalities: [String] = [],
+        supportsWebSearch: Bool? = nil,
+        thinking: ModelThinkingCapabilities? = nil
+    ) {
         self.id = id
         self.displayName = displayName
         self.type = type
         self.ownedBy = ownedBy
+        self.description = description
+        self.contextLength = contextLength
+        self.maxCompletionTokens = maxCompletionTokens
+        self.supportedInputModalities = supportedInputModalities
+        self.supportedOutputModalities = supportedOutputModalities
+        self.supportsWebSearch = supportsWebSearch
+        self.thinking = thinking
+    }
+
+    public var inputTokenLimit: Int? { contextLength }
+    public var outputTokenLimit: Int? { maxCompletionTokens }
+
+    private static func firstNonEmptyArray(_ values: [String]...) -> [String] {
+        values.first(where: { !$0.isEmpty }) ?? []
+    }
+}
+
+public struct ModelThinkingCapabilities: Decodable, Equatable, Sendable {
+    public let min: Int?
+    public let max: Int?
+    public let zeroAllowed: Bool?
+    public let dynamicAllowed: Bool?
+    public let levels: [String]
+
+    public init(
+        min: Int? = nil,
+        max: Int? = nil,
+        zeroAllowed: Bool? = nil,
+        dynamicAllowed: Bool? = nil,
+        levels: [String] = []
+    ) {
+        self.min = min
+        self.max = max
+        self.zeroAllowed = zeroAllowed
+        self.dynamicAllowed = dynamicAllowed
+        self.levels = levels
+    }
+
+    public var minimumTokens: Int? { min }
+    public var maximumTokens: Int? { max }
+
+    func mergingMissingMetadata(from other: ModelThinkingCapabilities?) -> ModelThinkingCapabilities {
+        guard let other else { return self }
+        return ModelThinkingCapabilities(
+            min: min ?? other.min,
+            max: max ?? other.max,
+            zeroAllowed: zeroAllowed ?? other.zeroAllowed,
+            dynamicAllowed: dynamicAllowed ?? other.dynamicAllowed,
+            levels: mergeUniqueStrings(levels, other.levels)
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case min
+        case max
+        case minimum
+        case maximum
+        case minTokens = "min_tokens"
+        case minTokensCamel = "minTokens"
+        case maxTokens = "max_tokens"
+        case maxTokensCamel = "maxTokens"
+        case zeroAllowed = "zero_allowed"
+        case zeroAllowedCamel = "zeroAllowed"
+        case dynamicAllowed = "dynamic_allowed"
+        case dynamicAllowedCamel = "dynamicAllowed"
+        case levels
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        min = try container.decodeFlexibleIntIfPresent(forKey: .min)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .minimum)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .minTokens)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .minTokensCamel)
+        max = try container.decodeFlexibleIntIfPresent(forKey: .max)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .maximum)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .maxTokens)
+            ?? container.decodeFlexibleIntIfPresent(forKey: .maxTokensCamel)
+        zeroAllowed = try container.decodeFlexibleBoolIfPresent(forKey: .zeroAllowed)
+            ?? container.decodeFlexibleBoolIfPresent(forKey: .zeroAllowedCamel)
+        dynamicAllowed = try container.decodeFlexibleBoolIfPresent(forKey: .dynamicAllowed)
+            ?? container.decodeFlexibleBoolIfPresent(forKey: .dynamicAllowedCamel)
+        levels = try container.decodeFlexibleStringArrayIfPresent(forKey: .levels)
     }
 }
 
@@ -543,6 +721,9 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
     public let recentRequests: [RecentRequestBucket]
     public let email: String?
     public let projectID: String?
+    public let prefix: String?
+    public let usingAPI: Bool?
+    public let proxyURL: String?
     public let accountType: String?
     public let account: String?
     public let chatgptAccountID: String?
@@ -588,6 +769,14 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
         case projectID = "project_id"
         case projectIDCamel = "projectId"
         case projectIDUpperCamel = "projectID"
+        case prefix
+        case usingAPI = "using_api"
+        case usingAPIKebab = "using-api"
+        case usingAPICamel = "usingAPI"
+        case proxyURL = "proxy_url"
+        case proxyURLKebab = "proxy-url"
+        case proxyURLCamel = "proxyURL"
+        case proxyUrlCamel = "proxyUrl"
         case accountType = "account_type"
         case accountTypeCamel = "accountType"
         case account
@@ -627,6 +816,90 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
         case note
         case websockets
         case webSockets
+    }
+
+    public init(
+        id: String,
+        authIndex: String? = nil,
+        name: String,
+        type: String? = nil,
+        provider: String? = nil,
+        label: String? = nil,
+        status: String? = nil,
+        statusMessage: String? = nil,
+        disabled: Bool = false,
+        unavailable: Bool = false,
+        runtimeOnly: Bool = false,
+        source: String? = nil,
+        size: Int64? = nil,
+        success: Int64 = 0,
+        failed: Int64 = 0,
+        recentRequests: [RecentRequestBucket] = [],
+        email: String? = nil,
+        projectID: String? = nil,
+        prefix: String? = nil,
+        usingAPI: Bool? = nil,
+        proxyURL: String? = nil,
+        accountType: String? = nil,
+        account: String? = nil,
+        chatgptAccountID: String? = nil,
+        planType: String? = nil,
+        path: String? = nil,
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil,
+        modifiedAt: Date? = nil,
+        lastRefresh: Date? = nil,
+        nextRetryAfter: Date? = nil,
+        nextRefreshAfter: Date? = nil,
+        quota: QuotaState? = nil,
+        modelStates: [String: ModelState] = [:],
+        lastError: ProviderError? = nil,
+        idToken: CodexIDTokenClaims? = nil,
+        antigravityCredits: AntigravityCredits? = nil,
+        priority: Int? = nil,
+        note: String? = nil,
+        websockets: Bool? = nil
+    ) {
+        self.id = id
+        self.authIndex = authIndex
+        self.name = name
+        self.type = type
+        self.provider = provider
+        self.label = label
+        self.status = status
+        self.statusMessage = statusMessage
+        self.disabled = disabled
+        self.unavailable = unavailable
+        self.runtimeOnly = runtimeOnly
+        self.source = source
+        self.size = size
+        self.success = success
+        self.failed = failed
+        self.recentRequests = recentRequests
+        self.email = email
+        self.projectID = projectID
+        self.prefix = prefix
+        self.usingAPI = usingAPI
+        self.proxyURL = proxyURL
+        self.accountType = accountType
+        self.account = account
+        self.chatgptAccountID = chatgptAccountID
+        self.planType = planType
+        self.path = path
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.modifiedAt = modifiedAt
+        self.lastRefresh = lastRefresh
+        self.nextRetryAfter = nextRetryAfter
+        self.nextRefreshAfter = nextRefreshAfter
+        self.quota = quota
+        self.modelStates = modelStates
+        self.lastError = lastError
+        self.idToken = idToken
+        self.antigravityCredits = antigravityCredits
+        self.priority = priority
+        self.note = note
+        self.websockets = websockets
     }
 
     public init(from decoder: Decoder) throws {
@@ -669,6 +942,16 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
             try container.decodeFlexibleStringIfPresent(forKey: .projectID),
             try container.decodeFlexibleStringIfPresent(forKey: .projectIDCamel),
             try container.decodeFlexibleStringIfPresent(forKey: .projectIDUpperCamel)
+        )
+        prefix = try container.decodeFlexibleStringIfPresent(forKey: .prefix)
+        usingAPI = try container.decodeFlexibleBoolIfPresent(forKey: .usingAPI)
+            ?? container.decodeFlexibleBoolIfPresent(forKey: .usingAPIKebab)
+            ?? container.decodeFlexibleBoolIfPresent(forKey: .usingAPICamel)
+        proxyURL = firstNonEmptyString(
+            try container.decodeFlexibleStringIfPresent(forKey: .proxyURL),
+            try container.decodeFlexibleStringIfPresent(forKey: .proxyURLKebab),
+            try container.decodeFlexibleStringIfPresent(forKey: .proxyURLCamel),
+            try container.decodeFlexibleStringIfPresent(forKey: .proxyUrlCamel)
         )
         accountType = firstNonEmptyString(
             try container.decodeFlexibleStringIfPresent(forKey: .accountType),
@@ -1249,10 +1532,14 @@ public extension CPAAccount {
         normalizedProvider == "xai" || normalizedProvider == "x-ai" || normalizedProvider == "grok"
     }
 
-    /// Codex / OpenAI accounts are the only ones exposing rolling 5-hour and 7-day
-    /// rate-limit windows, so the dashboard's 5h/7d headline average is scoped to them.
+    /// Codex / OpenAI OAuth accounts expose rolling quota windows. Config-based
+    /// OpenAI-compatible channels are model routes, not Codex usage identities.
     var isCodexLike: Bool {
-        normalizedProvider == "codex" || normalizedProvider.contains("openai")
+        let provider = normalizedProvider
+        guard !provider.hasPrefix("openai-compatible"), provider != "openai-compatibility" else {
+            return false
+        }
+        return provider == "codex" || provider == "openai" || provider.hasPrefix("openai-")
     }
 
     var totalRequests: Int64 {
@@ -1543,26 +1830,48 @@ public struct AccountQuota: Identifiable, Equatable, Sendable {
     }
 
     public var dashboardQuotaWindows: [QuotaWindow] {
-        let windows = quotaWindows
-        guard windows.count > 4 else {
-            return windows
+        if account.isCodexLike {
+            let windows = quotaWindows
+            guard windows.count > 4 else { return windows }
+            let pinnedIDs = Set([usage?.primary?.id, usage?.weekly?.id].compactMap { $0 })
+            var selected = windows.filter { pinnedIDs.contains($0.id) }
+            let selectedIDs = Set(selected.map(\.id))
+            let remaining = windows
+                .filter { !selectedIDs.contains($0.id) }
+                .sorted(by: quotaWindowAttentionSort)
+            for window in remaining where selected.count < 4 {
+                selected.append(window)
+            }
+            return selected
         }
 
-        let pinnedIDs = Set([usage?.primary?.id, usage?.weekly?.id].compactMap { $0 })
-        var selected = windows.filter { pinnedIDs.contains($0.id) }
-        let selectedIDs = Set(selected.map(\.id))
-        let remaining = windows
-            .filter { !selectedIDs.contains($0.id) }
-            .sorted(by: quotaWindowAttentionSort)
-
-        for window in remaining where selected.count < 4 {
-            selected.append(window)
+        let kinds = ProviderQuotaMetricKind.metrics(for: account.normalizedProvider)
+        guard !kinds.isEmpty else {
+            return Array(quotaWindows.sorted(by: quotaWindowAttentionSort).prefix(3))
         }
-        return selected
+        return kinds.map { kind in
+            kind.averagedWindow(in: self) ?? QuotaWindow(
+                id: "dashboard-missing-\(kind.rawValue)",
+                label: kind.cardLabel,
+                usedPercent: nil,
+                remainingPercent: nil,
+                resetAfterSeconds: nil,
+                resetAt: nil,
+                displayValue: "—",
+                isUsable: nil
+            )
+        }
     }
 
     public var hiddenDashboardQuotaWindowCount: Int {
-        max(0, quotaWindows.count - dashboardQuotaWindows.count)
+        if account.isCodexLike {
+            return max(0, quotaWindows.count - dashboardQuotaWindows.count)
+        }
+        let kinds = ProviderQuotaMetricKind.metrics(for: account.normalizedProvider)
+        guard kinds.isEmpty else {
+            return max(0, quotaWindows.count - kinds.flatMap { $0.matchingWindows(in: self) }.count)
+        }
+        return max(0, quotaWindows.count - dashboardQuotaWindows.count)
     }
 
     public var effectivePlanType: String? {
@@ -1727,6 +2036,8 @@ public struct ProviderInfo: Equatable, Sendable {
 }
 
 public enum ProviderCatalog {
+    private static let openAICompatiblePrefix = "openai-compatible-"
+
     private static let table: [String: ProviderInfo] = [
         "codex": ProviderInfo(key: "codex", displayName: "Codex", symbolName: "chevron.left.forwardslash.chevron.right", accentName: "teal", priority: 0, supportsUsage: true),
         "openai": ProviderInfo(key: "openai", displayName: "OpenAI", symbolName: "o.circle.fill", accentName: "mint", priority: 1, supportsUsage: true),
@@ -1736,13 +2047,29 @@ public enum ProviderCatalog {
         "vertex": ProviderInfo(key: "vertex", displayName: "Vertex AI", symbolName: "cloud.fill", accentName: "indigo", priority: 5, supportsUsage: false),
         "antigravity": ProviderInfo(key: "antigravity", displayName: "Antigravity", symbolName: "paperplane.fill", accentName: "purple", priority: 6, supportsUsage: true),
         "xai": ProviderInfo(key: "xai", displayName: "Grok", symbolName: "x.circle.fill", accentName: "gray", priority: 7, supportsUsage: true),
-        "kimi": ProviderInfo(key: "kimi", displayName: "Kimi", symbolName: "k.circle.fill", accentName: "pink", priority: 8, supportsUsage: true)
+        "kimi": ProviderInfo(key: "kimi", displayName: "Kimi", symbolName: "k.circle.fill", accentName: "pink", priority: 8, supportsUsage: true),
+        "codex-api-key": ProviderInfo(key: "codex-api-key", displayName: "Codex API Key", symbolName: "key.fill", accentName: "teal", priority: 40, supportsUsage: false),
+        "claude-api-key": ProviderInfo(key: "claude-api-key", displayName: "Claude API Key", symbolName: "key.fill", accentName: "orange", priority: 41, supportsUsage: false),
+        "gemini-api-key": ProviderInfo(key: "gemini-api-key", displayName: "Gemini API Key", symbolName: "key.fill", accentName: "blue", priority: 42, supportsUsage: false),
+        "interactions-api-key": ProviderInfo(key: "interactions-api-key", displayName: "Interactions API Key", symbolName: "key.fill", accentName: "blue", priority: 43, supportsUsage: false),
+        "vertex-api-key": ProviderInfo(key: "vertex-api-key", displayName: "Vertex API Key", symbolName: "key.fill", accentName: "indigo", priority: 44, supportsUsage: false)
     ]
 
     public static func info(for rawKey: String) -> ProviderInfo {
         let normalized = normalizeProviderKey(rawKey)
         if let exact = table[normalized] {
             return exact
+        }
+        if normalized.hasPrefix(openAICompatiblePrefix) {
+            let channel = String(normalized.dropFirst(openAICompatiblePrefix.count))
+            return ProviderInfo(
+                key: normalized,
+                displayName: channel.isEmpty ? "OpenAI Compat" : channel,
+                symbolName: "circle.hexagongrid.fill",
+                accentName: "mint",
+                priority: 50,
+                supportsUsage: false
+            )
         }
         if normalized.contains("openai") {
             return ProviderInfo(key: normalized, displayName: "OpenAI Compat", symbolName: "circle.hexagongrid.fill", accentName: "mint", priority: 50, supportsUsage: false)
@@ -1935,6 +2262,18 @@ private func nonEmptyString(_ value: String?) -> String? {
     return trimmed.isEmpty ? nil : trimmed
 }
 
+func mergeUniqueStrings(_ first: [String], _ second: [String]) -> [String] {
+    var seen = Set<String>()
+    return (first + second).compactMap { value in
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = trimmed.lowercased()
+        guard !key.isEmpty, seen.insert(key).inserted else {
+            return nil
+        }
+        return trimmed
+    }
+}
+
 private func singleValueString(from decoder: Decoder) -> String? {
     guard let container = try? decoder.singleValueContainer(), !container.decodeNil() else {
         return nil
@@ -2111,6 +2450,25 @@ extension KeyedDecodingContainer {
             return value ? "true" : "false"
         }
         return nil
+    }
+
+    func decodeFlexibleStringArrayIfPresent(forKey key: Key) throws -> [String] {
+        guard contains(key), try !decodeNil(forKey: key) else {
+            return []
+        }
+        if let values = try? decode([String].self, forKey: key) {
+            return mergeUniqueStrings(values, [])
+        }
+        if let values = try? decode([Int].self, forKey: key) {
+            return values.map(String.init)
+        }
+        if let value = try? decode(String.self, forKey: key) {
+            let values = value
+                .split(separator: ",", omittingEmptySubsequences: true)
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            return mergeUniqueStrings(values, [])
+        }
+        return []
     }
 
     func decodeFlexibleBoolIfPresent(forKey key: Key) throws -> Bool? {

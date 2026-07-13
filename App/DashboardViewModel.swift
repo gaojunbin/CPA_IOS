@@ -35,6 +35,15 @@ final class DashboardViewModel: ObservableObject {
         isLoading || isSyncingLiveUsage
     }
 
+    var liveUsageProgressText: String? {
+        guard liveUsageTotal > 0 else { return nil }
+        if isSyncingLiveUsage {
+            return "正在同步额度 \(liveUsageCompleted)/\(liveUsageTotal)"
+        }
+        guard liveUsageCompleted > 0 else { return nil }
+        return "额度已同步 \(liveUsageCompleted)/\(liveUsageTotal)"
+    }
+
     func refreshIfStale(using connection: SavedConnection) {
         guard activeConnection == connection || !isBusy else {
             return
@@ -536,6 +545,14 @@ struct AccountProviderSection: Identifiable, Equatable {
         accounts.filter { quota in
             quota.statusKind == .error || (quota.errorMessage ?? "").isEmpty == false
         }.count
+    }
+
+    var healthRatio: AccountHealthRatio {
+        accounts.healthRatio
+    }
+
+    var quotaAverages: [ProviderQuotaAverage] {
+        DashboardMetrics.quotaAverages(providerKey: provider.key, accounts: accounts)
     }
 
     var lowestRemainingPercent: Double? {

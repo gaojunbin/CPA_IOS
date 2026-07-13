@@ -257,8 +257,10 @@ struct QuotaWindowDetailRow: View {
                     .minimumScaleFactor(0.75)
             }
 
-            ProgressView(value: (window.remainingPercent ?? 0) / 100)
-                .tint(quotaTint(window.remainingPercent, isUsable: window.isUsable))
+            if let remainingPercent = window.remainingPercent {
+                ProgressView(value: remainingPercent / 100)
+                    .tint(quotaTint(remainingPercent, isUsable: window.isUsable))
+            }
 
             QuotaWindowMetadataLabels(window: window, font: .caption.weight(.medium))
         }
@@ -510,6 +512,19 @@ struct ModelListRow: View {
                     .truncationMode(.middle)
                     .textSelection(.enabled)
             }
+            if let capabilities = modelCapabilitySummary(row.model) {
+                Text(capabilities)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            if let description = row.model.description, !description.isEmpty {
+                Text(description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
         }
     }
 
@@ -726,6 +741,15 @@ struct AccountMetadataSection: View {
                 }
                 if let planType = account.effectivePlanType, !planType.isEmpty {
                     DetailRow(title: "计划", value: planType)
+                }
+                if let prefix = account.account.prefix, !prefix.isEmpty {
+                    DetailRow(title: "模型前缀", value: prefix)
+                }
+                if account.account.isXAI, let usingAPI = account.account.usingAPI {
+                    DetailRow(title: "Grok 路径", value: usingAPI ? "xAI 官方 API" : "Grok CLI Chat Proxy")
+                }
+                if let proxyURL = ModelRoutingResolver.sanitizedEndpoint(account.account.proxyURL) {
+                    DetailRow(title: "出站代理", value: proxyURL, isSensitive: true)
                 }
                 if let subscriptionStart = account.account.idToken?.subscriptionActiveStart {
                     DetailRow(title: "订阅开始", value: absoluteTime(subscriptionStart))

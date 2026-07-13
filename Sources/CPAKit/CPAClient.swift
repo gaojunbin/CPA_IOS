@@ -25,13 +25,25 @@ public final class CPAClient: Sendable {
     public let baseURL: URL
     private let managementKey: String
     private let session: CPAHTTPSession
-    private static let antigravityDefaultProjectID = "bamboo-precept-lgxtn"
-    private static let antigravityModelURLs = [
+    private static let antigravityQuotaURLs = [
+        "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+        "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:retrieveUserQuotaSummary",
+        "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
+    ]
+    private static let antigravityLegacyModelURLs = [
         "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
         "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:fetchAvailableModels",
         "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels"
     ]
+    private static let antigravitySubscriptionURL =
+        "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+    private static let antigravityUserAgent =
+        "antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)"
+    private static let xaiClientVersion = "0.2.93"
+    private static let xaiBillingWeeklyURL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
+    private static let xaiBillingMonthlyURL = "https://cli-chat-proxy.grok.com/v1/billing"
     private static let accountQuotaBatchSize = 6
+    private static let modelBatchSize = 8
 
     public init(baseURL: URL, managementKey: String, session: CPAHTTPSession = CPAURLSession.shared) {
         self.baseURL = baseURL
@@ -45,36 +57,17 @@ public final class CPAClient: Sendable {
     }
 
     public func fetchDashboard(includeLiveUsage: Bool = true) async throws -> ManagementDashboard {
-        let authFilesResult: (AuthFilesResponse, HTTPURLResponse) = try await request(path: "/v0/management/auth-files")
+        let authFilesResult: (AuthFilesResponse, HTTPURLResponse) = try await request(
+            path: "/v0/management/auth-files"
+        )
         let accounts = authFilesResult.0.files
-
-        async let apiKeyUsageResponse: [String: [String: APIKeyUsageEntry]]? = optionalRequest(
-            path: "/v0/management/api-key-usage",
-            timeout: 8
-        )
-        async let switchProjectResponse: BooleanValueResponse? = optionalRequest(
-            path: "/v0/management/quota-exceeded/switch-project",
-            timeout: 8
-        )
-        async let switchPreviewResponse: BooleanValueResponse? = optionalRequest(
-            path: "/v0/management/quota-exceeded/switch-preview-model",
-            timeout: 8
-        )
         let accountQuotas = includeLiveUsage
             ? await fetchAccountQuotas(accounts)
             : accounts.map { AccountQuota(account: $0, usage: nil, errorMessage: nil) }
 
-        let optionalResponses = await (apiKeyUsageResponse, switchProjectResponse, switchPreviewResponse)
-        let apiKeyUsage = APIKeyUsageParser.flatten(optionalResponses.0 ?? [:])
-        let switchProject = optionalResponses.1?.switchProject ?? optionalResponses.1?.value
-        let switchPreview = optionalResponses.2?.switchPreviewModel ?? optionalResponses.2?.value
-
         return ManagementDashboard(
             accounts: accounts,
             accountQuotas: accountQuotas,
-            apiKeyUsage: apiKeyUsage,
-            quotaSwitchProject: switchProject,
-            quotaSwitchPreviewModel: switchPreview,
             serverVersion: authFilesResult.1.value(forHTTPHeaderField: "X-CPA-VERSION"),
             serverCommit: authFilesResult.1.value(forHTTPHeaderField: "X-CPA-COMMIT"),
             serverBuildDate: authFilesResult.1.value(forHTTPHeaderField: "X-CPA-BUILD-DATE"),
@@ -104,7 +97,7 @@ public final class CPAClient: Sendable {
         }
     }
 
-    private func request<T: Decodable & Sendable>(
+    func request<T: Decodable & Sendable>(
         path: String,
         method: String = "GET",
         queryItems: [URLQueryItem] = [],
@@ -146,7 +139,7 @@ public final class CPAClient: Sendable {
         }
     }
 
-    private func dataRequest(
+    func dataRequest(
         path: String,
         method: String = "GET",
         queryItems: [URLQueryItem] = [],
@@ -270,35 +263,70 @@ public final class CPAClient: Sendable {
             "Authorization": "Bearer $TOKEN$",
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "codex_cli_rs/0.76.0 (iOS) CPA-iOS/1.0"
+            "User-Agent": "codex_cli_rs/0.76.0 (Mac OS 15.0.0; arm64) CPA-iOS/1.3"
         ]
         if let accountID = account.chatgptAccountID, !accountID.isEmpty {
             headers["ChatGPT-Account-Id"] = accountID
         }
 
-        return try await fetchUsageViaAPICall(payload: APICallRequest(
+        let usagePayload = APICallRequest(
             authIndex: account.authIndex ?? "",
             method: "GET",
             url: "https://chatgpt.com/backend-api/wham/usage",
             header: headers,
             data: nil
-        ))
+        )
+        var resetHeaders = headers
+        resetHeaders["OpenAI-Beta"] = "codex-1"
+        resetHeaders["Originator"] = "Codex Desktop"
+        let resetPayload = APICallRequest(
+            authIndex: account.authIndex ?? "",
+            method: "GET",
+            url: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+            header: resetHeaders,
+            data: nil
+        )
+
+        async let usageTask = fetchAPICallEnvelope(payload: usagePayload)
+        async let resetTask = fetchOptionalAPICallEnvelope(payload: resetPayload)
+        let usageEnvelope = try await usageTask
+        let resetEnvelope = await resetTask
+        guard (200..<300).contains(usageEnvelope.statusCode) else {
+            throw CPAAPIError.httpStatus(
+                code: usageEnvelope.statusCode,
+                message: Self.errorMessage(from: usageEnvelope.body) ?? usageEnvelope.body
+            )
+        }
+
+        var usageObject = Self.jsonObject(from: usageEnvelope.body) ?? [:]
+        if let resetEnvelope,
+           (200..<300).contains(resetEnvelope.statusCode),
+           let resetObject = Self.jsonObject(from: resetEnvelope.body) {
+            usageObject["rate_limit_reset_credits"] = resetObject
+        }
+        if let snapshot = UsageParser.parse(try jsonString(usageObject)) {
+            return snapshot
+        }
+        throw CPAAPIError.decoding("empty Codex quota")
     }
 
     private func fetchAntigravityUsage(for account: CPAAccount) async throws -> UsageSnapshot {
-        let projectID = await antigravityProjectID(for: account)
+        guard let projectID = await antigravityProjectID(for: account) else {
+            throw CPAAPIError.decoding("missing Antigravity project_id")
+        }
         let payloadBody = try jsonString(["project": projectID])
         let headers = [
             "Authorization": "Bearer $TOKEN$",
             "Content-Type": "application/json",
-            "User-Agent": "antigravity/1.21.9 iOS"
+            "User-Agent": Self.antigravityUserAgent
         ]
 
+        async let subscriptionTask = fetchAntigravitySubscription(for: account, headers: headers)
         var lastError: Error?
         var emptySnapshot: UsageSnapshot?
         var sawSuccessfulResponse = false
 
-        for url in Self.antigravityModelURLs {
+        for url in Self.antigravityQuotaURLs {
             do {
                 let envelope = try await fetchAPICallEnvelope(payload: APICallRequest(
                     authIndex: account.authIndex ?? "",
@@ -316,13 +344,47 @@ public final class CPAClient: Sendable {
                 }
 
                 sawSuccessfulResponse = true
-                if let snapshot = UsageParser.parse(envelope.body) {
+                let subscriptionData = await subscriptionTask
+                let subscriptionObject = subscriptionData.flatMap {
+                    try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+                } ?? [:]
+                let combined: [String: Any] = [
+                    "_provider": "antigravity",
+                    "quota": Self.jsonObject(from: envelope.body) ?? [:],
+                    "subscription": subscriptionObject
+                ]
+                if let snapshot = UsageParser.parse(try jsonString(combined)) {
                     if snapshot.hasQuotaSignal {
                         return snapshot
                     }
                     emptySnapshot = snapshot
                 } else {
-                    lastError = CPAAPIError.decoding("empty Antigravity model quota")
+                    lastError = CPAAPIError.decoding("empty Antigravity quota summary")
+                }
+            } catch {
+                lastError = error
+            }
+        }
+
+        for url in Self.antigravityLegacyModelURLs {
+            do {
+                let envelope = try await fetchAPICallEnvelope(payload: APICallRequest(
+                    authIndex: account.authIndex ?? "",
+                    method: "POST",
+                    url: url,
+                    header: headers,
+                    data: payloadBody
+                ))
+                guard (200..<300).contains(envelope.statusCode) else {
+                    lastError = CPAAPIError.httpStatus(
+                        code: envelope.statusCode,
+                        message: Self.errorMessage(from: envelope.body) ?? envelope.body
+                    )
+                    continue
+                }
+                sawSuccessfulResponse = true
+                if let snapshot = UsageParser.parse(envelope.body), snapshot.hasQuotaSignal {
+                    return snapshot
                 }
             } catch {
                 lastError = error
@@ -337,8 +399,44 @@ public final class CPAClient: Sendable {
                 rawStatus: "empty_models"
             )
         }
+        throw lastError ?? CPAAPIError.decoding("empty Antigravity quota")
+    }
 
-        throw lastError ?? CPAAPIError.decoding("empty Antigravity model quota")
+    private func fetchAntigravitySubscription(
+        for account: CPAAccount,
+        headers: [String: String]
+    ) async -> Data? {
+        let body = try? jsonString(["metadata": ["ideType": "ANTIGRAVITY"]])
+        guard let envelope = try? await fetchAPICallEnvelope(payload: APICallRequest(
+            authIndex: account.authIndex ?? "",
+            method: "POST",
+            url: Self.antigravitySubscriptionURL,
+            header: headers,
+            data: body
+        )),
+        (200..<300).contains(envelope.statusCode),
+        let root = Self.jsonObject(from: envelope.body)
+        else {
+            return nil
+        }
+
+        let paidTier = firstDictionary(root["paidTier"], root["paid_tier"])
+        let currentTier = firstDictionary(root["currentTier"], root["current_tier"])
+        let tier = (firstString(paidTier?["id"]) == nil ? currentTier : paidTier) ?? [:]
+        let tierID = firstString(tier["id"])
+        let plan: String
+        switch tierID?.lowercased() {
+        case "free-tier": plan = "free"
+        case "g1-pro-tier": plan = "pro"
+        case "g1-ultra-tier": plan = "ultra"
+        case "g1-ultra-lite-tier": plan = "ultra-lite"
+        default: plan = "unknown"
+        }
+        var normalized: [String: Any] = ["plan": plan]
+        if let tierID { normalized["tierId"] = tierID }
+        if let tierName = firstString(tier["name"]) { normalized["tierName"] = tierName }
+        if let paidTier { normalized["paidTier"] = paidTier }
+        return try? JSONSerialization.data(withJSONObject: normalized)
     }
 
     private func fetchClaudeUsage(for account: CPAAccount) async throws -> UsageSnapshot {
@@ -347,27 +445,30 @@ public final class CPAClient: Sendable {
             "Content-Type": "application/json",
             "anthropic-beta": "oauth-2025-04-20"
         ]
-        let usageEnvelope = try await fetchAPICallEnvelope(payload: APICallRequest(
+        let usagePayload = APICallRequest(
             authIndex: account.authIndex ?? "",
             method: "GET",
             url: "https://api.anthropic.com/api/oauth/usage",
             header: headers,
             data: nil
-        ))
+        )
+        let profilePayload = APICallRequest(
+            authIndex: account.authIndex ?? "",
+            method: "GET",
+            url: "https://api.anthropic.com/api/oauth/profile",
+            header: headers,
+            data: nil
+        )
+        async let usageTask = fetchAPICallEnvelope(payload: usagePayload)
+        async let profileTask = fetchOptionalAPICallEnvelope(payload: profilePayload)
+        let usageEnvelope = try await usageTask
+        let profileEnvelope = await profileTask
         guard (200..<300).contains(usageEnvelope.statusCode) else {
             throw CPAAPIError.httpStatus(
                 code: usageEnvelope.statusCode,
                 message: Self.errorMessage(from: usageEnvelope.body) ?? usageEnvelope.body
             )
         }
-
-        let profileEnvelope = try? await fetchAPICallEnvelope(payload: APICallRequest(
-            authIndex: account.authIndex ?? "",
-            method: "GET",
-            url: "https://api.anthropic.com/api/oauth/profile",
-            header: headers,
-            data: nil
-        ))
         let usageObject = Self.jsonObject(from: usageEnvelope.body) ?? [:]
         let profileObject = profileEnvelope.flatMap { envelope -> [String: Any]? in
             guard (200..<300).contains(envelope.statusCode) else {
@@ -397,13 +498,58 @@ public final class CPAClient: Sendable {
     }
 
     private func fetchXAIUsage(for account: CPAAccount) async throws -> UsageSnapshot {
-        try await fetchUsageViaAPICall(payload: APICallRequest(
+        var headers = [
+            "Authorization": "Bearer $TOKEN$",
+            "x-xai-token-auth": "xai-grok-cli",
+            "x-grok-client-version": Self.xaiClientVersion,
+            "Accept": "*/*",
+            "User-Agent": "grok-pager/\(Self.xaiClientVersion) grok-shell/\(Self.xaiClientVersion) (macos; aarch64)"
+        ]
+        if let userID = await xaiUserID(for: account) {
+            headers["x-userid"] = userID
+        }
+
+        let weeklyPayload = APICallRequest(
             authIndex: account.authIndex ?? "",
             method: "GET",
-            url: "https://cli-chat-proxy.grok.com/v1/billing",
-            header: ["Authorization": "Bearer $TOKEN$"],
+            url: Self.xaiBillingWeeklyURL,
+            header: headers,
             data: nil
-        ))
+        )
+        let monthlyPayload = APICallRequest(
+            authIndex: account.authIndex ?? "",
+            method: "GET",
+            url: Self.xaiBillingMonthlyURL,
+            header: headers,
+            data: nil
+        )
+        async let weeklyTask = fetchOptionalAPICallEnvelope(payload: weeklyPayload)
+        async let monthlyTask = fetchOptionalAPICallEnvelope(payload: monthlyPayload)
+        let weeklyEnvelope = await weeklyTask
+        let monthlyEnvelope = await monthlyTask
+
+        let weeklyObject = weeklyEnvelope.flatMap { envelope in
+            (200..<300).contains(envelope.statusCode) ? Self.jsonObject(from: envelope.body) : nil
+        }
+        let monthlyObject = monthlyEnvelope.flatMap { envelope in
+            (200..<300).contains(envelope.statusCode) ? Self.jsonObject(from: envelope.body) : nil
+        }
+        guard weeklyObject != nil || monthlyObject != nil else {
+            let failed = weeklyEnvelope ?? monthlyEnvelope
+            throw CPAAPIError.httpStatus(
+                code: failed?.statusCode ?? 502,
+                message: Self.errorMessage(from: failed?.body ?? "") ?? "empty Grok billing response"
+            )
+        }
+        let combined: [String: Any] = [
+            "_provider": "xai",
+            "weekly": weeklyObject ?? [:],
+            "monthly": monthlyObject ?? [:]
+        ]
+        if let snapshot = UsageParser.parse(try jsonString(combined)), snapshot.hasQuotaSignal {
+            return snapshot
+        }
+        throw CPAAPIError.decoding("empty Grok quota")
     }
 
     private func fetchUsageViaAPICall(payload: APICallRequest) async throws -> UsageSnapshot {
@@ -448,7 +594,11 @@ public final class CPAClient: Sendable {
         throw lastError ?? CPAAPIError.invalidResponse
     }
 
-    private func antigravityProjectID(for account: CPAAccount) async -> String {
+    private func fetchOptionalAPICallEnvelope(payload: APICallRequest) async -> APICallEnvelope? {
+        try? await fetchAPICallEnvelope(payload: payload)
+    }
+
+    private func antigravityProjectID(for account: CPAAccount) async -> String? {
         if let projectID = account.projectID?.trimmingCharacters(in: .whitespacesAndNewlines),
            !projectID.isEmpty {
             return projectID
@@ -457,13 +607,38 @@ public final class CPAClient: Sendable {
            let projectID = Self.projectID(fromAuthFileBody: body) {
             return projectID
         }
-        return Self.antigravityDefaultProjectID
+        return nil
+    }
+
+    private func xaiUserID(for account: CPAAccount) async -> String? {
+        guard let body = try? await downloadAuthFile(named: account.name),
+              let data = body.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+        return firstNonEmptyString(
+            firstString(root["sub"]),
+            firstString(root["subject"]),
+            firstString(root["user_id"]),
+            firstString(root["userId"]),
+            firstString(nested(root, "oauth", "sub")),
+            firstString(nested(root, "user", "sub")),
+            firstString(nested(root, "user", "id"))
+        )
     }
 
     private func downloadAuthFile(named name: String) async throws -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasSuffix(".json"),
+              !trimmed.contains("/"),
+              !trimmed.contains("\\")
+        else {
+            throw CPAAPIError.invalidResponse
+        }
         let (data, _) = try await dataRequest(
             path: "/v0/management/auth-files/download",
-            queryItems: [URLQueryItem(name: "name", value: name)]
+            queryItems: [URLQueryItem(name: "name", value: trimmed)]
         )
         return String(data: data, encoding: .utf8) ?? ""
     }

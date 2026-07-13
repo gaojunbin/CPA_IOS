@@ -3,7 +3,12 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var connectionStore: ConnectionStore
     @EnvironmentObject private var notificationRouter: NotificationRouter
+    #if DEBUG
+    // `-cpa-demo` lets screenshot/UI automation open the demo dashboard directly.
+    @State private var showsPreview = ProcessInfo.processInfo.arguments.contains("-cpa-demo")
+    #else
     @State private var showsPreview = false
+    #endif
 
     var body: some View {
         Group {
@@ -30,7 +35,26 @@ struct RootView: View {
                 showsPreview = false
             }
         }
+        #if DEBUG
+        .task {
+            autoConnectIfRequested()
+        }
+        #endif
     }
+
+    #if DEBUG
+    /// Launch arguments `-CPAAutoConnectURL <url> -CPAAutoConnectKey <key>` let simulator
+    /// automation reach the live dashboard without typing into the setup form. Debug only.
+    private func autoConnectIfRequested() {
+        guard connectionStore.profiles.isEmpty,
+              let url = UserDefaults.standard.string(forKey: "CPAAutoConnectURL"),
+              let key = UserDefaults.standard.string(forKey: "CPAAutoConnectKey")
+        else {
+            return
+        }
+        _ = try? connectionStore.addProfile(name: "验证服务", baseURLString: url, managementKey: key)
+    }
+    #endif
 }
 
 struct ConnectionSetupView: View {

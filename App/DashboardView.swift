@@ -5,6 +5,11 @@ struct DashboardView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel = DashboardViewModel()
     @State private var showsSettings = false
+    #if DEBUG
+    // Launch argument `-CPAAutoOpenScreen models|routing` deep-links the insight
+    // screens so simulator automation can exercise them. Debug builds only.
+    @State private var autoOpenScreen = UserDefaults.standard.string(forKey: "CPAAutoOpenScreen")
+    #endif
 
     let connection: SavedConnection
     var previewSnapshot: ManagementDashboard?
@@ -76,11 +81,44 @@ struct DashboardView: View {
                 SettingsView(onPreview: onShowPreview)
                     .environmentObject(connectionStore)
             }
+            #if DEBUG
+            .navigationDestination(isPresented: autoOpenBinding("models")) {
+                ModelPoolView(client: CPAClient(
+                    baseURL: connection.baseURL,
+                    managementKey: connection.managementKey
+                ))
+            }
+            .navigationDestination(isPresented: autoOpenBinding("routing")) {
+                RoutingView(client: CPAClient(
+                    baseURL: connection.baseURL,
+                    managementKey: connection.managementKey
+                ))
+            }
+            .navigationDestination(isPresented: autoOpenBinding("apikeys")) {
+                APIKeysView(client: CPAClient(
+                    baseURL: connection.baseURL,
+                    managementKey: connection.managementKey
+                ))
+            }
+            #endif
         }
         .onDisappear {
             viewModel.cancelRefresh()
         }
     }
+
+    #if DEBUG
+    private func autoOpenBinding(_ screen: String) -> Binding<Bool> {
+        Binding(
+            get: { autoOpenScreen == screen },
+            set: { isPresented in
+                if !isPresented, autoOpenScreen == screen {
+                    autoOpenScreen = nil
+                }
+            }
+        )
+    }
+    #endif
 
     @ViewBuilder private var principalView: some View {
         if previewSnapshot != nil {
@@ -153,12 +191,44 @@ struct DashboardView: View {
             }
             .accessibilityLabel("退出演示")
         } else {
-            Button {
-                showsSettings = true
+            Menu {
+                NavigationLink {
+                    ModelPoolView(client: CPAClient(
+                        baseURL: connection.baseURL,
+                        managementKey: connection.managementKey
+                    ))
+                } label: {
+                    Label("模型池", systemImage: "square.stack.3d.up.fill")
+                }
+
+                NavigationLink {
+                    RoutingView(client: CPAClient(
+                        baseURL: connection.baseURL,
+                        managementKey: connection.managementKey
+                    ))
+                } label: {
+                    Label("上游模型路由", systemImage: "arrow.triangle.branch")
+                }
+
+                NavigationLink {
+                    APIKeysView(client: CPAClient(
+                        baseURL: connection.baseURL,
+                        managementKey: connection.managementKey
+                    ))
+                } label: {
+                    Label("API 密钥", systemImage: "key.horizontal.fill")
+                }
+
+                Divider()
+                Button {
+                    showsSettings = true
+                } label: {
+                    Label("服务与设置", systemImage: "gearshape.fill")
+                }
             } label: {
-                Image(systemName: "gearshape.fill")
+                Image(systemName: "ellipsis.circle.fill")
             }
-            .accessibilityLabel("设置")
+            .accessibilityLabel("更多")
         }
     }
 
@@ -186,10 +256,14 @@ struct DashboardView: View {
                     DashboardHeader(
                         connection: connection,
                         snapshot: viewModel.snapshot,
-                        isLoading: viewModel.isBusy
+                        isLoading: viewModel.isBusy,
+                        syncProgressText: viewModel.liveUsageProgressText
                     )
 
-                    DashboardSummaryCard(summary: viewModel.summary)
+                    DashboardOverviewCard(
+                        health: viewModel.accountQuotas.healthRatio,
+                        sections: viewModel.providerSections
+                    )
 
                     if let errorMessage = viewModel.errorMessage {
                         InlineErrorView(message: errorMessage)
@@ -217,6 +291,7 @@ struct DashboardHeader: View {
     let connection: SavedConnection
     let snapshot: ManagementDashboard?
     let isLoading: Bool
+    let syncProgressText: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -239,12 +314,21 @@ struct DashboardHeader: View {
 
             Spacer(minLength: 8)
 
-            if isLoading {
-                ProgressView()
-            } else if let date = snapshot?.fetchedAt {
-                Text(relativeTime(date))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .trailing, spacing: 5) {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                if let syncProgressText {
+                    Text(syncProgressText)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(isLoading ? .teal : .secondary)
+                }
+                if let date = snapshot?.fetchedAt {
+                    Text(relativeTime(date))
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(16)
@@ -252,44 +336,125 @@ struct DashboardHeader: View {
     }
 }
 
-struct DashboardSummaryCard: View {
-    let summary: DashboardSummary
+struct DashboardOverviewCard: View {
+    let health: AccountHealthRatio
+    let sections: [AccountProviderSection]
 
-    private var accountValue: String {
-        if summary.quotaAccounts == summary.total || summary.quotaAccounts == 0 {
-            return "\(summary.total)"
+    private var focusSections: [AccountProviderSection] {
+        let providerAware = sections.filter {
+            !ProviderQuotaMetricKind.metrics(for: $0.provider.key).isEmpty
         }
-        return "\(summary.quotaAccounts)/\(summary.total)"
-    }
-
-    private var caption: String {
-        if summary.codexAccounts == 0 {
-            return "5h · 7d 为 Codex 账号平均剩余额度（当前无 Codex 账号）；其他渠道额度见下方各自卡片。"
-        }
-        let suffix = summary.codexAccounts == 1 ? "" : "，共 \(summary.codexAccounts) 个"
-        return "5h · 7d 为 Codex 账号平均剩余额度\(suffix)；其他渠道额度见下方各自卡片。"
+        return Array((providerAware.isEmpty ? sections : providerAware).prefix(4))
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 0) {
-                SummaryStat(title: "Codex 5h", value: displayPercent(summary.primaryAverage), tint: quotaTint(summary.primaryAverage))
-                Divider().frame(height: 38)
-                SummaryStat(title: "Codex 7d", value: displayPercent(summary.weeklyAverage), tint: quotaTint(summary.weeklyAverage))
-                Divider().frame(height: 38)
-                SummaryStat(title: "账号", value: accountValue, tint: .primary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("账号与渠道健康")
+                    .font(.headline)
+                Spacer()
+                Text(health.displayValue)
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(healthTint)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(healthTint.opacity(0.12), in: Capsule())
+                    .accessibilityLabel("健康账号 \(health.healthy)，总账号 \(health.total)")
             }
 
-            Text(caption)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, alignment: .center)
+            if focusSections.isEmpty {
+                Text("暂无账号健康数据")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.flexible()), GridItem(.flexible())],
+                    spacing: 8
+                ) {
+                    ForEach(focusSections) { section in
+                        ProviderPulseTile(section: section)
+                    }
+                }
+            }
         }
         .padding(16)
         .cpaCard()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Codex 5 小时剩余 \(displayPercent(summary.primaryAverage))，Codex 7 天剩余 \(displayPercent(summary.weeklyAverage))，账号 \(accountValue)。\(caption)")
+    }
+
+    private var healthTint: Color {
+        guard health.total > 0 else { return .secondary }
+        if health.isFullyHealthy { return .green }
+        if health.healthy == 0 { return .red }
+        return .orange
+    }
+}
+
+private struct ProviderPulseTile: View {
+    let section: AccountProviderSection
+
+    private var health: AccountHealthRatio { section.healthRatio }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 5) {
+                Image(systemName: section.provider.symbolName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(providerTint(section.provider.key))
+                Text(section.provider.displayName)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 3)
+                Text(health.displayValue)
+                    .font(.caption2.weight(.bold).monospacedDigit())
+                    .foregroundStyle(healthTint)
+            }
+
+            ForEach(Array(quotaLines.enumerated()), id: \.offset) { _, line in
+                HStack(spacing: 4) {
+                    Text(line.label)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 3)
+                    Text(displayPercent(line.value))
+                        .font(.caption2.weight(.bold).monospacedDigit())
+                        .foregroundStyle(quotaTint(line.value))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 62, alignment: .topLeading)
+        .padding(10)
+        .cpaInset(providerTint(section.provider.key).opacity(0.08))
+    }
+
+    private var quotaLines: [(label: String, value: Double?)] {
+        let averages = section.quotaAverages
+        func value(_ kind: ProviderQuotaMetricKind) -> Double? {
+            averages.first { $0.kind == kind }?.remainingPercent
+        }
+        switch section.provider.key {
+        case "codex", "openai":
+            return [("5h", value(.codexFiveHour)), ("7d", value(.codexSevenDay))]
+        case "claude":
+            return [("5h", value(.claudeFiveHour)), ("7d", value(.claudeSevenDay))]
+        case "antigravity":
+            return [
+                ("Gemini 5h", value(.antigravityGeminiFiveHour)),
+                ("Gemini 7d", value(.antigravityGeminiSevenDay)),
+                ("Claude/GPT 5h", value(.antigravityClaudeGPTFiveHour)),
+                ("Claude/GPT 7d", value(.antigravityClaudeGPTSevenDay))
+            ]
+        case "xai":
+            return [("周", value(.xaiWeekly)), ("月", value(.xaiMonthly))]
+        default:
+            return []
+        }
+    }
+
+    private var healthTint: Color {
+        guard health.total > 0 else { return .secondary }
+        if health.isFullyHealthy { return .green }
+        if health.healthy == 0 { return .red }
+        return .orange
     }
 }
 
@@ -388,10 +553,13 @@ struct AccountProviderSectionView: View {
                         Label("\(section.errorAccounts)", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
                     }
-                    Text("\(section.accounts.count)")
-                        .foregroundStyle(.secondary)
+                    Text(section.healthRatio.displayValue)
+                        .foregroundStyle(sectionHealthTint)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(sectionHealthTint.opacity(0.12), in: Capsule())
                 }
-                .font(.caption.weight(.bold))
+                .font(.caption.weight(.bold).monospacedDigit())
             }
             .padding(.horizontal, 2)
 
@@ -413,22 +581,27 @@ struct AccountProviderSectionView: View {
         }
     }
 
+    private var sectionHealthTint: Color {
+        let health = section.healthRatio
+        guard health.total > 0 else { return .secondary }
+        if health.isFullyHealthy { return .green }
+        if health.healthy == 0 { return .red }
+        return .orange
+    }
+
     private var sectionSubtitle: String {
-        if section.provider.supportsUsage {
-            let quotaMetrics = [
-                section.primaryAverage.map { "5h \(displayPercent($0))" },
-                section.weeklyAverage.map { "7d \(displayPercent($0))" },
-                section.lowestRemainingPercent.map { "最低 \(displayPercent($0))" }
-            ].compactMap { $0 }
-            if !quotaMetrics.isEmpty {
-                return quotaMetrics.joined(separator: " · ")
-            }
-            if let lowest = section.lowestRemainingPercent {
-                return "最低剩余 \(displayPercent(lowest)) · \(section.quotaAccounts) 个额度账号"
-            }
-            return "\(section.quotaAccounts) 个额度账号"
+        let health = "健康 \(section.healthRatio.displayValue)"
+        let values = section.quotaAverages.compactMap { average -> String? in
+            guard let remaining = average.remainingPercent else { return nil }
+            return "\(average.kind.cardLabel) \(displayPercent(remaining))"
         }
-        return "身份状态"
+        if !values.isEmpty {
+            return (values + [health]).joined(separator: " · ")
+        }
+        if section.provider.supportsUsage, let lowest = section.lowestRemainingPercent {
+            return "最低 \(displayPercent(lowest)) · \(health)"
+        }
+        return health
     }
 }
 
@@ -589,8 +762,10 @@ struct QuotaWindowMiniRow: View {
                 QuotaWindowMetadataLabels(window: window, font: .caption2.weight(.medium))
             }
 
-            ProgressView(value: (window.remainingPercent ?? 0) / 100)
-                .tint(quotaTint(window.remainingPercent, isUsable: window.isUsable))
+            if let remainingPercent = window.remainingPercent {
+                ProgressView(value: remainingPercent / 100)
+                    .tint(quotaTint(remainingPercent, isUsable: window.isUsable))
+            }
         }
     }
 

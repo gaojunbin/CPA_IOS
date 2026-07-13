@@ -269,3 +269,72 @@ func creditsLine(_ credits: AntigravityCredits) -> String {
     }
     return "\(state) · \(amount) / \(minimum)"
 }
+
+func modelCapabilitySummary(_ model: CPAModelDefinition) -> String? {
+    var parts: [String] = []
+    if let contextLength = model.contextLength, contextLength > 0 {
+        parts.append("\(compactTokenCount(contextLength)) 上下文")
+    }
+    if let outputLimit = model.maxCompletionTokens, outputLimit > 0 {
+        parts.append("\(compactTokenCount(outputLimit)) 输出")
+    }
+    if model.thinking != nil {
+        parts.append("思考")
+    }
+
+    let modalities = Set(
+        (model.supportedInputModalities + model.supportedOutputModalities)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+    )
+    var media: [String] = []
+    if modalities.contains(where: { $0 == "image" || $0 == "images" || $0 == "vision" }) {
+        media.append("图像")
+    }
+    if modalities.contains(where: { $0 == "audio" || $0 == "speech" }) {
+        media.append("音频")
+    }
+    if modalities.contains("video") {
+        media.append("视频")
+    }
+    if model.supportsWebSearch == true {
+        media.append("Web")
+    }
+    if !media.isEmpty {
+        parts.append(media.joined(separator: "/"))
+    }
+    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+}
+
+func compactTokenCount(_ value: Int) -> String {
+    if value > 0, value & (value - 1) == 0 {
+        if value >= 1_048_576 {
+            return "\(value / 1_048_576)M"
+        }
+        if value >= 1_024 {
+            return "\(value / 1_024)K"
+        }
+    }
+    let units: [(threshold: Double, suffix: String)] = [
+        (1_000_000, "M"),
+        (1_000, "K")
+    ]
+    let numericValue = Double(value)
+    for unit in units where numericValue >= unit.threshold {
+        let scaled = numericValue / unit.threshold
+        let rounded = scaled.rounded()
+        if abs(scaled - rounded) < 0.05 || scaled >= 10 {
+            return "\(Int(rounded))\(unit.suffix)"
+        }
+        return String(format: "%.1f%@", scaled, unit.suffix)
+            .replacingOccurrences(of: ".0", with: "")
+    }
+    return "\(value)"
+}
+
+func routingStrategyText(_ raw: String) -> String {
+    switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    case "fill-first": return "优先填充"
+    case "round-robin": return "轮询"
+    default: return raw.isEmpty ? "未知策略" : raw
+    }
+}

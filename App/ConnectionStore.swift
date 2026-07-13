@@ -343,7 +343,9 @@ final class ConnectionStore: ObservableObject {
         lastBaseURLString = normalizedURL.absoluteString
 
         // The very first service becomes the active one so the dashboard opens immediately.
-        if selectedID == nil {
+        // A stale selection whose Keychain key is gone resolves to no connection; treat
+        // that the same way so adding a replacement service always unblocks the dashboard.
+        if selectedID == nil || connection == nil {
             selectedID = profile.id
             ConnectionStorage.setSelectedID(profile.id, defaults: defaults)
             QuotaAlertNotifier.resetAlertHistory()

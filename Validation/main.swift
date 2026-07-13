@@ -22,7 +22,7 @@ final class CapturingSession: CPAHTTPSession, @unchecked Sendable {
     }
 }
 
-final class QueueSession: CPAHTTPSession, @unchecked Sendable {
+actor QueueSession: CPAHTTPSession {
     private var payloads: [Data]
     private(set) var requests: [URLRequest] = []
 
@@ -102,6 +102,40 @@ actor RouteSession: CPAHTTPSession {
     }
 }
 
+actor UpstreamRouteSession: CPAHTTPSession {
+    private let managementRoutes: [String: Data]
+    private let upstreamRoutes: [String: Data]
+    private var recordedRequests: [URLRequest] = []
+
+    var requests: [URLRequest] { recordedRequests }
+
+    init(managementRoutes: [String: Data] = [:], upstreamRoutes: [String: Data]) {
+        self.managementRoutes = managementRoutes
+        self.upstreamRoutes = upstreamRoutes
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        recordedRequests.append(request)
+        let path = request.url?.path ?? ""
+        let payload: Data
+        if path == "/v0/management/api-call",
+           let body = request.httpBody,
+           let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+           let upstreamURL = object["url"] as? String {
+            payload = upstreamRoutes[upstreamURL] ?? Data(#"{"status_code":404,"body":"not found"}"#.utf8)
+        } else {
+            payload = managementRoutes[path] ?? Data(#"{"error":"not found"}"#.utf8)
+        }
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        return (payload, response)
+    }
+}
+
 enum ValidationError: Error, CustomStringConvertible {
     case failed(String)
 
@@ -171,9 +205,9 @@ func validateDashboardClient(apiKeyUsageJSON: Data) async throws {
     )
     let dashboard = try await dashboardClient.fetchDashboard(includeLiveUsage: false)
     try expect(dashboard.accounts.count == 1, "dashboard auth files failed")
-    try expect(dashboard.apiKeyUsage.count == 1, "dashboard api key usage failed")
-    try expect(dashboard.quotaSwitchProject == true, "dashboard switch project failed")
-    try expect(dashboard.quotaSwitchPreviewModel == false, "dashboard switch preview failed")
+    try expect(dashboard.apiKeyUsage.isEmpty, "base dashboard should not retain unused raw API-key usage")
+    try expect(dashboard.quotaSwitchProject == nil, "base dashboard should not fetch unused quota switch state")
+    try expect(dashboard.quotaSwitchPreviewModel == nil, "base dashboard should not fetch unused preview switch state")
     try expect(dashboard.serverVersion == "v7.1.0", "dashboard server version header failed")
     try expect(dashboard.serverCommit == "abcdef1234567890", "dashboard server commit header failed")
     try expect(dashboard.serverBuildDate == "2026-05-30T01:02:03Z", "dashboard server build date header failed")
@@ -186,7 +220,8 @@ func validateDashboardClient(apiKeyUsageJSON: Data) async throws {
         }
     }
     try expect(dashboardPaths.contains("/v0/management/auth-files"), "dashboard auth-files request missing")
-    try expect(dashboardPaths.contains("/v0/management/api-key-usage"), "dashboard api-key usage request missing")
+    try expect(!dashboardPaths.contains("/v0/management/api-key-usage"), "base dashboard should not delay refresh for unused API-key usage")
+    try expect(!dashboardPaths.contains("/v0/management/quota-exceeded/switch-project"), "base dashboard should not request unused quota switches")
     try expect(!dashboardPaths.contains("/v0/management/api-call"), "base dashboard should not fetch live usage")
     let dashboardAuthRequest = try require(
         dashboardRequests.first { $0.url?.path == "/v0/management/auth-files" },
@@ -297,7 +332,7 @@ func validateNotificationAlertSettingSource(
     readme: String,
     submissionNotes: String
 ) throws {
-    try expect(settingsSource.contains("let canSendAlerts = authorized ? await QuotaAlertNotifier.canSendAlerts() : false"), "settings should verify current alert delivery availability after notification authorization")
+    try expect(settingsSource.contains("let canSend = authorized ? await QuotaAlertNotifier.canSendAlerts() : false"), "settings should verify current alert delivery availability after notification authorization")
     try expect(notifierSource.contains("settings.alertSetting"), "quota alerts should respect the per-app alert presentation setting")
     try expect(notifierSource.contains("alertSetting == .enabled"), "quota alerts should disable local alerts when notification banners are turned off")
     try expect(readme.contains("turns off notification banners/alerts"), "README should document alert setting availability")
@@ -407,8 +442,330 @@ func validateAPIKeyUsageParser() throws -> Data {
     return apiKeyUsageJSON
 }
 
+func validateMacOSV130Parity() throws {
+    let modelJSON = Data(#"{"id":"gpt-demo","display_name":"GPT Demo","context_length":"131072","maxCompletionTokens":8192,"supported_input_modalities":["text","image"],"supportedOutputModalities":"text,audio","supports_web_search":true,"thinking":{"min_tokens":128,"maxTokens":"4096","dynamic_allowed":true,"levels":["low","high"]}}"#.utf8)
+    let model = try JSONDecoder().decode(CPAModelDefinition.self, from: modelJSON)
+    try expect(model.contextLength == 131_072, "model context-length decoding failed")
+    try expect(model.maxCompletionTokens == 8_192, "model output-limit decoding failed")
+    try expect(model.supportedInputModalities == ["text", "image"], "model input modalities failed")
+    try expect(model.supportedOutputModalities == ["text", "audio"], "model output modalities failed")
+    try expect(model.supportsWebSearch == true, "model web-search capability failed")
+    try expect(model.thinking?.max == 4_096, "model thinking capability failed")
+
+    let claudeAccount = CPAAccount(
+        id: "claude-health",
+        authIndex: "claude-index",
+        name: "claude.json",
+        provider: "claude",
+        status: "active"
+    )
+    let lowQuota = AccountQuota(
+        account: claudeAccount,
+        usage: UsageSnapshot(
+            planType: "max",
+            primary: nil,
+            weekly: nil,
+            additionalWindows: [
+                QuotaWindow(
+                    id: "claude-five-hour",
+                    label: "5 小时限额",
+                    usedPercent: 95,
+                    remainingPercent: 5,
+                    resetAfterSeconds: nil,
+                    resetAt: nil,
+                    isUsable: true
+                )
+            ],
+            rawStatus: "ok"
+        ),
+        errorMessage: nil
+    )
+    try expect([lowQuota].healthRatio == AccountHealthRatio(healthy: 1, total: 1), "low quota should not count as unhealthy")
+
+    let secondQuota = AccountQuota(
+        account: CPAAccount(
+            id: "claude-health-2",
+            authIndex: "claude-index-2",
+            name: "claude-2.json",
+            provider: "claude",
+            status: "active"
+        ),
+        usage: UsageSnapshot(
+            planType: "max",
+            primary: nil,
+            weekly: nil,
+            additionalWindows: [
+                QuotaWindow(
+                    id: "claude-five-hour",
+                    label: "5 小时限额",
+                    usedPercent: 5,
+                    remainingPercent: 95,
+                    resetAfterSeconds: nil,
+                    resetAt: nil,
+                    isUsable: true
+                )
+            ],
+            rawStatus: "ok"
+        ),
+        errorMessage: nil
+    )
+    let claudeAverage = DashboardMetrics.quotaAverages(
+        providerKey: "claude",
+        accounts: [lowQuota, secondQuota]
+    ).first { $0.kind == .claudeFiveHour }
+    try expect(claudeAverage?.remainingPercent == 50, "provider quota averages should weight accounts equally")
+    try expect(claudeAverage?.contributingAccounts == 2, "provider quota average account count failed")
+
+    let route = ModelRouteDefinition(
+        name: "upstream-model",
+        alias: "client-model",
+        prefix: "team",
+        source: "validation"
+    )
+    try expect(
+        ModelRoutingResolver.expand(route, forceModelPrefix: false).map(\.publicModelID) == ["client-model", "team/client-model"],
+        "compatible prefix expansion failed"
+    )
+    try expect(
+        ModelRoutingResolver.expand(route, forceModelPrefix: true).map(\.publicModelID) == ["team/client-model"],
+        "forced prefix expansion failed"
+    )
+    let sanitized = ModelRoutingResolver.sanitizedEndpoint("https://user:secret@proxy.example.com/path?token=abc#fragment")
+    try expect(sanitized == "https://proxy.example.com/path", "routing endpoint sanitization failed")
+
+    let configRoot: [String: Any] = [
+        "interactions-api-key": [[
+            "api-key": "sk-validation-secret",
+            "prefix": "mobile",
+            "excluded-models": ["blocked-*"],
+            "models": [
+                ["name": "gemini-live", "alias": "gemini-mobile"],
+                ["name": "blocked-upstream", "alias": "blocked-model"]
+            ]
+        ]]
+    ]
+    let entries = ConfigChannelSynthesizer.apiKeyEntries(kind: .interactions, root: configRoot)
+    try expect(entries.count == 1, "interactions config entry parsing failed")
+    let configAccounts = ConfigChannelSynthesizer.apiKeyAccounts(
+        kind: .interactions,
+        entries: entries,
+        staticModels: []
+    )
+    try expect(configAccounts.first?.models.map(\.id) == ["gemini-mobile", "mobile/gemini-mobile"], "config aliases or exclusions failed")
+    try expect(configAccounts.first?.account.label?.contains("validation-secret") == false, "config key masking should hide the full secret")
+
+    let antigravityJSON = #"{"_provider":"antigravity","quota":{"groups":[{"displayName":"Gemini","buckets":[{"bucketId":"five-hour","displayName":"5h","window":"5h","remainingFraction":0.75}]}]},"subscription":{"plan":"pro"}}"#
+    let antigravity = try require(UsageParser.parse(antigravityJSON), "modern Antigravity summary did not parse")
+    try expect(antigravity.planType == "pro", "Antigravity subscription plan failed")
+    try expect(antigravity.additionalWindows.first?.remainingPercent == 75, "Antigravity bucket quota failed")
+
+    let grokJSON = #"{"_provider":"xai","weekly":{"config":{"creditUsagePercent":25}},"monthly":{"config":{"monthlyLimit":5000,"used":1000}}}"#
+    let grok = try require(UsageParser.parse(grokJSON), "modern Grok quota did not parse")
+    try expect(grok.additionalWindows.contains { $0.id == "xai-weekly-credits" }, "Grok weekly credits missing")
+    try expect(grok.additionalWindows.contains { $0.id == "xai-monthly-credits" }, "Grok monthly credits missing")
+
+    let codexJSON = #"{"rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":18000},"secondary_window":{"used_percent":20,"limit_window_seconds":604800}},"code_review_rate_limit":{"primary_window":{"used_percent":30,"limit_window_seconds":18000}},"rate_limit_reset_credits":{"available_count":2}}"#
+    let codex = try require(UsageParser.parse(codexJSON), "modern Codex quota did not parse")
+    try expect(codex.additionalWindows.contains { $0.id == "code-review-5h" }, "Codex code-review window missing")
+    try expect(codex.additionalWindows.contains { $0.id == "code-reset-credits" }, "Codex reset-credit count missing")
+}
+
+func validateRoutingSnapshotEndToEnd() async throws {
+    let authFilesJSON = Data("""
+    {
+      "files": [
+        {
+          "id": "codex-live",
+          "auth_index": "codex-index",
+          "name": "codex.json",
+          "provider": "codex",
+          "status": "active"
+        }
+      ]
+    }
+    """.utf8)
+    let authModelsJSON = Data(#"{"models":[{"id":"gpt-5.2","display_name":"GPT 5.2","context_length":400000,"supports_web_search":true}]}"#.utf8)
+    let compatJSON = Data("""
+    {
+      "openai-compatibility": [
+        {
+          "name": "gateway",
+          "prefix": "gw",
+          "base-url": "https://gw.example.com/v1",
+          "api-key-entries": [
+            {"api-key": "sk-compat-1234567890"},
+            {"api-key": "sk-compat-abcdefghij"}
+          ],
+          "models": [
+            {"name": "up-a", "alias": "shared"},
+            {"name": "up-b", "alias": "shared"}
+          ]
+        }
+      ]
+    }
+    """.utf8)
+    let aliasJSON = Data(#"{"oauth-model-alias":{"codex":[{"name":"gpt-5.1","alias":"gpt-best","fork":true}]}}"#.utf8)
+    let excludedJSON = Data(#"{"oauth-excluded-models":{"codex":["blocked-*"]}}"#.utf8)
+    let downloadJSON = Data("""
+    {
+      "access_token": "secret-token-should-never-surface",
+      "prefix": "team",
+      "priority": 7,
+      "proxy_url": "https://user:secret@egress.example.com/path?token=abc#frag",
+      "model_aliases": [
+        {"name": "gpt-5.2", "alias": "gpt-best"}
+      ],
+      "excluded_models": ["private-model"]
+    }
+    """.utf8)
+
+    let session = RouteSession(routes: [
+        "/v0/management/auth-files": (200, authFilesJSON),
+        "/v0/management/auth-files/models": (200, authModelsJSON),
+        "/v0/management/auth-files/download": (200, downloadJSON),
+        "/v0/management/openai-compatibility": (200, compatJSON),
+        "/v0/management/oauth-model-alias": (200, aliasJSON),
+        "/v0/management/oauth-excluded-models": (200, excludedJSON),
+        "/v0/management/routing/strategy": (200, Data(#"{"strategy":"fill-first"}"#.utf8)),
+        "/v0/management/force-model-prefix": (200, Data(#"{"force-model-prefix":true}"#.utf8))
+    ])
+    let client = CPAClient(
+        baseURL: try CPABaseURLNormalizer.normalize("https://proxy.example.com"),
+        managementKey: "secret",
+        session: session
+    )
+
+    let pool = try await client.fetchModelPool()
+    let codexPool = try require(
+        pool.providers.first { $0.provider.key == "codex" },
+        "routing e2e: codex model pool group missing"
+    )
+    try expect(codexPool.models.first?.model.id == "gpt-5.2", "routing e2e: codex pool model missing")
+    try expect(codexPool.models.first?.model.contextLength == 400_000, "routing e2e: codex model capability metadata missing")
+    let compatPool = try require(
+        pool.providers.first { $0.provider.key == "openai-compatible-gateway" },
+        "routing e2e: compat model pool group missing"
+    )
+    try expect(
+        compatPool.models.map(\.model.id) == ["gw/shared"],
+        "routing e2e: force-model-prefix should keep only prefixed config IDs"
+    )
+
+    let snapshot = try await client.fetchModelRoutingSnapshot()
+    try expect(snapshot.strategy == "fill-first", "routing e2e: strategy failed")
+    try expect(snapshot.forceModelPrefix == true, "routing e2e: force prefix flag failed")
+    try expect(snapshot.failedSections.isEmpty, "routing e2e: 404 sections should not be failures")
+
+    let codexGroup = try require(
+        snapshot.providers.first { $0.provider.key == "codex" },
+        "routing e2e: codex routing group missing"
+    )
+    try expect(codexGroup.prefixes == ["team"], "routing e2e: per-account prefix override failed")
+    try expect(codexGroup.priorities == [7], "routing e2e: per-account priority override failed")
+    try expect(
+        codexGroup.proxyURLs == ["https://egress.example.com/path"],
+        "routing e2e: proxy sanitization failed: \(codexGroup.proxyURLs)"
+    )
+    try expect(
+        Set(codexGroup.excludedModels) == Set(["blocked-*", "private-model"]),
+        "routing e2e: merged exclusions failed"
+    )
+    let codexRoute = try require(codexGroup.routes.first, "routing e2e: codex route missing")
+    try expect(codexGroup.routes.count == 1, "routing e2e: local alias should override same global alias")
+    try expect(codexRoute.publicModelID == "team/gpt-best", "routing e2e: forced prefix public ID failed")
+    try expect(codexRoute.name == "gpt-5.2", "routing e2e: account alias should win over global alias")
+
+    let compatGroup = try require(
+        snapshot.providers.first { $0.provider.key == "openai-compatible-gateway" },
+        "routing e2e: compat routing group missing"
+    )
+    try expect(compatGroup.accountCount == 2, "routing e2e: compat credential count failed")
+    try expect(compatGroup.baseURLs == ["https://gw.example.com/v1"], "routing e2e: compat base URL failed")
+    let sharedRoutes = compatGroup.routes.filter { $0.publicModelID == "gw/shared" }
+    try expect(
+        Set(sharedRoutes.map(\.name)) == Set(["up-a", "up-b"]),
+        "routing e2e: repeated alias should stay a routing pool"
+    )
+
+    let snapshotText = String(describing: snapshot)
+    try expect(
+        !snapshotText.contains("secret-token-should-never-surface"),
+        "routing e2e: raw auth tokens must never reach the routing snapshot"
+    )
+}
+
+func validateAPIKeyManagementEndToEnd() async throws {
+    let session = RouteSession(routes: [
+        "/v0/management/api-keys": (200, Data(#"{"api-keys":["sk-cpa-alpha-000111222333","sk-b"]}"#.utf8))
+    ])
+    let client = CPAClient(
+        baseURL: try CPABaseURLNormalizer.normalize("https://proxy.example.com"),
+        managementKey: "secret",
+        session: session
+    )
+
+    let keys = try await client.fetchAPIKeys()
+    try expect(keys == ["sk-cpa-alpha-000111222333", "sk-b"], "api-keys list decoding failed")
+
+    try await client.addAPIKey("  sk-new-key-999888777666  ")
+    try await client.deleteAPIKey("sk-cpa-alpha-000111222333")
+    do {
+        try await client.addAPIKey("   ")
+        throw ValidationError.failed("empty api key must be rejected before any request")
+    } catch let error as CPAAPIError {
+        try expect(
+            error.localizedDescription.contains("API 密钥不能为空"),
+            "empty api key should produce a localized error"
+        )
+    }
+
+    let requests = await session.requests
+    let patchRequest = try require(
+        requests.first { $0.httpMethod == "PATCH" },
+        "api-key add should use PATCH"
+    )
+    try expect(
+        patchRequest.url?.path == "/v0/management/api-keys",
+        "api-key PATCH path failed"
+    )
+    let patchBody = try require(
+        patchRequest.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] },
+        "api-key PATCH body missing"
+    )
+    try expect(
+        patchBody == ["old": "sk-new-key-999888777666", "new": "sk-new-key-999888777666"],
+        "api-key PATCH should send trimmed old==new append semantics"
+    )
+    let deleteRequest = try require(
+        requests.first { $0.httpMethod == "DELETE" },
+        "api-key delete should use DELETE"
+    )
+    try expect(
+        deleteRequest.url?.absoluteString == "https://proxy.example.com/v0/management/api-keys?value=sk-cpa-alpha-000111222333",
+        "api-key DELETE should target exact value"
+    )
+    try expect(
+        requests.filter { $0.httpMethod == "PATCH" }.count == 1,
+        "rejected empty api key must not reach the server"
+    )
+
+    let generated = generateAPIKey()
+    let generatedAgain = generateAPIKey()
+    try expect(generated.hasPrefix("sk-cpa-"), "generated api key should use the sk-cpa prefix")
+    try expect(generated.count >= 30, "generated api key should be long enough")
+    try expect(generated != generatedAgain, "generated api keys must be random")
+    try expect(
+        generated.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" },
+        "generated api key should be URL-safe"
+    )
+}
+
 @MainActor
 func runValidation() async throws {
+    try validateMacOSV130Parity()
+    try await validateRoutingSnapshotEndToEnd()
+    try await validateAPIKeyManagementEndToEnd()
+
     let panelURL = try CPABaseURLNormalizer.normalize("https://cpa.junbingao.com/management.html#/quota")
     try expect(panelURL.absoluteString == "https://cpa.junbingao.com", "panel URL normalization failed")
     let subpathPanelURL = try CPABaseURLNormalizer.normalize("https://proxy.example.com/cpa/management.html#/quota")
@@ -1711,8 +2068,10 @@ func runValidation() async throws {
     try expect(readme.contains("Show backend refresh schedule and Codex subscription dates"), "README should document account detail refresh schedule and subscription dates")
     try expect(readme.contains("slow quota providers do not block model status visibility"), "README should document independent detail quota/model loading")
     try expect(readme.contains("Mark available models with runtime status badges"), "README should document model runtime status badges")
-    try expect(readme.contains("Show provider-level 5h/7d averages"), "README should document provider section quota summaries")
-    try expect(readme.contains("Render each channel's quota from the live web payload"), "README should document per-channel quota rendering")
+    try expect(readme.contains("provider-specific equal-weight quota averages"), "README should document provider-aware quota summaries")
+    try expect(readme.contains("Render each channel's quota from live upstream payloads"), "README should document current provider quota contracts")
+    try expect(readme.contains("Upstream Model Routing"), "README should document the routing inventory screen")
+    try expect(readme.contains("Model Pool"), "README should document the model-pool screen")
     try expect(readme.contains("privacy-sensitive"), "README should document sensitive UI redaction hints")
     try expect(readme.contains("server hosts, dashboard account identifiers, project IDs"), "README should document dashboard privacy-sensitive fields")
     try expect(readme.contains("without including the management key"), "README should document no-key support diagnostics")
@@ -1764,6 +2123,13 @@ func runValidation() async throws {
     try expect(rootSource.contains("displayErrorMessage(error.localizedDescription, limit: 180)"), "connection errors should be compact on small screens")
     let projectFile = try fileText("CPA-IOS.xcodeproj/project.pbxproj")
     try expect(projectFile.contains("CPAUsageParser.swift in Sources"), "Xcode project should compile CPAUsageParser.swift")
+    try expect(projectFile.contains("CPADashboardMetrics.swift in Sources"), "Xcode project should compile provider-aware dashboard metrics")
+    try expect(projectFile.contains("CPAConfigChannels.swift in Sources"), "Xcode project should compile config-channel synthesis")
+    try expect(projectFile.contains("CPAModelPool.swift in Sources"), "Xcode project should compile model-pool aggregation")
+    try expect(projectFile.contains("CPARoutingModels.swift in Sources"), "Xcode project should compile routing models")
+    try expect(projectFile.contains("CPAClientRouting.swift in Sources"), "Xcode project should compile routing client support")
+    try expect(projectFile.contains("ServiceInsightsView.swift in Sources"), "Xcode project should compile phone-adapted model and routing screens")
+    try expect(projectFile.contains("MARKETING_VERSION = 1.3.0"), "iOS release version should match macOS v1.3.0")
     try expect(projectFile.contains("QuotaAlertNotifier.swift in Sources"), "Xcode project should compile QuotaAlertNotifier.swift")
     try expect(projectFile.contains("BackgroundQuotaRefreshScheduler.swift in Sources"), "Xcode project should compile background refresh scheduler")
     try expect(projectFile.contains("PrivacyInfo.xcprivacy in Resources"), "Xcode project should bundle PrivacyInfo.xcprivacy")
@@ -1799,26 +2165,23 @@ func runValidation() async throws {
     try expect(connectionStoreSource.contains("enum ConnectionStorage"), "connection storage keys should be shared by foreground and background refresh paths")
     try expect(connectionStoreSource.contains("static func disableQuotaAlerts"), "connection storage should expose alert disablement for background permission loss")
     try expect(connectionStoreSource.contains("nonisolated static func loadSavedConnectionFromStorage()"), "background refresh should load the saved connection without creating UI state")
-    try expect(!connectionStoreSource.contains("BackgroundQuotaRefreshScheduler.reschedule(for: connection)"), "connection store init should not submit background tasks before app delegate registration")
-    try expect(connectionStoreSource.contains("BackgroundQuotaRefreshScheduler.reschedule(for: savedConnection)"), "saving or disabling alerts should reschedule background refresh state")
+    try expect(connectionStoreSource.contains("BackgroundQuotaRefreshScheduler.reschedule(for: current)"), "active service changes should reschedule background refresh state")
+    try expect(connectionStoreSource.contains("BackgroundQuotaRefreshScheduler.reschedule(for: connection)"), "permission reconciliation should reschedule the selected service")
     try expect(connectionStoreSource.contains("BackgroundQuotaRefreshScheduler.cancel()"), "clearing or disabling alerts should cancel background refresh")
     try expect(connectionStoreSource.contains("SecItemUpdate"), "Keychain save should update existing items before adding")
     try expect(connectionStoreSource.contains("SecItemUpdate(query as CFDictionary, [\n            kSecValueData as String: data,\n            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly"), "Keychain updates should migrate existing management keys for Background App Refresh access")
     try expect(connectionStoreSource.contains("addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly"), "new management keys should be readable after first unlock for Background App Refresh")
     try expect(connectionStoreSource.contains("QuotaAlertNotifier.resetAlertHistory()"), "disabling alerts should clear local alert state")
-    try expect(connectionStoreSource.contains("QuotaAlertNotifier.clearBadgeIfNeeded(alertsEnabled: connection?.quotaAlertsEnabled == true)"), "app launch should clear stale local badge state when alerts cannot run")
+    try expect(connectionStoreSource.contains("QuotaAlertNotifier.clearBadgeIfNeeded(alertsEnabled: resolved?.quotaAlertsEnabled == true)"), "app launch should clear stale local badge state when alerts cannot run")
     try expect(connectionStoreSource.contains("QuotaAlertNotifier.clearBadgeIfNeeded(alertsEnabled: true)"), "foreground permission reconciliation should clear stale badges when only badge permission is disabled")
     try expect(connectionStoreSource.contains("func reconcileQuotaAlertAuthorization() async"), "connection store should reconcile revoked notification permission")
     try expect(connectionStoreSource.contains("QuotaAlertNotifier.canSendAlerts()"), "connection store should check current notification permission")
     try expect(connectionStoreSource.contains("disableQuotaAlertsAfterPermissionLoss"), "connection store should disable alerts after notification permission is lost")
-    try expect(connectionStoreSource.contains("let hasExistingConnection = connection != nil"), "connection save should distinguish first setup from settings updates")
-    try expect(connectionStoreSource.contains("quotaAlertsEnabled ?? (hasExistingConnection ? self.quotaAlertsEnabled : false)"), "first connection setup should not inherit stale low-quota alert defaults")
-    try expect(connectionStoreSource.contains("quotaAlertShowsAccountNames ?? (hasExistingConnection ? self.quotaAlertShowsAccountNames : false)"), "first connection setup should not inherit stale detailed notification defaults")
-    try expect(connectionStoreSource.contains("guard connection != nil else"), "connection store should clear alert defaults when no saved connection exists")
-    try expect(connectionStoreSource.contains("let showAccountNames = alertsEnabled ? requestedShowAccountNames : false"), "disabling alerts should also disable detailed notification text")
-    try expect(connectionStoreSource.contains("private func shouldResetAlertHistory"), "connection changes should reset local alert throttle")
-    try expect(connectionStoreSource.contains("previousConnection.managementKey != newManagementKey"), "management key changes should reset local alert throttle")
-    try expect(connectionStoreSource.contains("previousAlertSettings.threshold != newAlertThreshold"), "threshold changes should reset local alert throttle")
+    try expect(connectionStoreSource.contains("if selectedID == nil"), "the first saved service should become active")
+    try expect(connectionStoreSource.contains("quotaAlertShowsAccountNames: alertsEnabled ? quotaAlertShowsAccountNames : false"), "disabling alerts should also disable detailed notification text")
+    try expect(connectionStoreSource.contains("ConnectionStorage.saveManagementKey(trimmedKey, for: profile.id)"), "each service should save its management key under its own profile ID")
+    try expect(connectionStoreSource.contains("QuotaAlertNotifier.resetAlertHistory()"), "service or alert changes should reset local alert throttle")
+    try expect(connectionStoreSource.contains("refreshSelectedConnection()"), "service changes should refresh the selected connection")
     let viewHelpersSource = try fileText("App/ViewHelpers.swift")
     try expect(viewHelpersSource.contains("return ProviderCatalog.info(for: provider).symbolName"), "provider badges should use catalog symbols instead of hard-coded provider switches")
     try expect(viewHelpersSource.contains("providerAccentColor(ProviderCatalog.info(for: provider).accentName)"), "provider badges should use catalog accent colors")
@@ -1833,6 +2196,10 @@ func runValidation() async throws {
     try expect(!usageParserSource.contains(": \"now\""), "usage parser should not surface untranslated reset text")
     try expect(usageParserSource.contains("displayKimiDuration(duration, unit: unit))限额"), "Kimi quota windows should use localized duration labels")
     try expect(usageParserSource.contains("displayDuration(seconds: seconds))后重置"), "quota reset hints should use localized Chinese countdown text")
+    try expect(usageParserSource.contains("parseAntigravityQuotaSummaryPayload"), "usage parsing should support Antigravity groups and buckets")
+    try expect(usageParserSource.contains("xai-weekly-credits"), "usage parsing should expose Grok weekly credits")
+    try expect(usageParserSource.contains("code-review-5h"), "usage parsing should expose Codex code-review windows")
+    try expect(usageParserSource.contains("code-reset-credits"), "usage parsing should expose Codex reset-credit counts")
     let clientSource = try fileText("Sources/CPAKit/CPAClient.swift")
     try expect(clientSource.contains("X-CPA-BUILD-DATE"), "client should read server build date headers")
     try expect(clientSource.contains("stableAccountIdentitySort(lhs, rhs)"), "client live quota sorting should have deterministic account identity tie-breaks")
@@ -1845,6 +2212,11 @@ func runValidation() async throws {
     try expect(clientSource.contains("cachePolicy: .reloadIgnoringLocalCacheData"), "management requests should ignore local caches")
     try expect(clientSource.contains("Cache-Control"), "management requests should include explicit no-store cache headers")
     try expect(clientSource.contains("@MainActor\n    private static func decodeResponse"), "management response decoding should avoid cooperative-executor stack overflows")
+    try expect(clientSource.contains("rate-limit-reset-credits"), "Codex quota refresh should request reset-credit metadata")
+    try expect(clientSource.contains("retrieveUserQuotaSummary"), "Antigravity quota refresh should use the current summary contract")
+    try expect(clientSource.contains("fetchAvailableModels"), "Antigravity quota refresh should retain the legacy compatibility fallback")
+    try expect(clientSource.contains("billing?format=credits"), "Grok quota refresh should request weekly credits")
+    try expect(clientSource.contains("x-grok-client-version"), "Grok quota refresh should send current CLI compatibility headers")
     let apiErrorSource = try fileText("Sources/CPAKit/CPAAPIError.swift")
     try expect(apiErrorSource.contains("case transport(String)"), "API errors should include transport failures")
     try expect(apiErrorSource.contains("网络请求失败"), "transport errors should have localized descriptions")
@@ -1853,6 +2225,10 @@ func runValidation() async throws {
     try expect(modelsSource.contains("var displayNameIsSensitive"), "account model should identify sensitive dashboard display names")
     try expect(modelsSource.contains("public static func demoModels(for account: CPAAccount)"), "demo dashboard should expose bundled account-detail model metadata")
     try expect(modelsSource.contains("CPAModelDefinition(id: \"claude-opus-4\""), "demo model metadata should include runtime-limited Claude sample")
+    try expect(modelsSource.contains("public let contextLength: Int?"), "model metadata should decode context limits")
+    try expect(modelsSource.contains("public let supportedInputModalities: [String]"), "model metadata should decode modalities")
+    try expect(modelsSource.contains("public struct ModelThinkingCapabilities"), "model metadata should decode thinking capabilities")
+    try expect(modelsSource.contains("\"interactions-api-key\""), "provider catalog should include interactions API keys")
     try expect(modelsSource.contains("quotaWindowAttentionSort"), "dashboard quota windows should prioritize exhausted and low quota rows")
     try expect(modelsSource.contains("hiddenDashboardQuotaWindowCount"), "account quota should expose hidden dashboard quota count")
     try expect(modelsSource.contains("lastRefreshedAt = \"last_refreshed_at\""), "auth decoder should accept SDK-style last_refreshed_at timestamps")
@@ -1931,19 +2307,52 @@ func runValidation() async throws {
     try expect(accountDetailSource.contains("QuotaWindowMetadataLabels(window: window, font: .caption.weight(.medium))"), "account detail quota metadata should adapt on narrow screens")
     try expect(accountDetailSource.contains("Text(account.account.name)") && accountDetailSource.contains(".truncationMode(.middle)"), "account detail should middle-truncate long account filenames")
     try expect(accountDetailSource.contains(".accessibilityLabel(\"\\(title)，\\(value)\")"), "detail counters should expose compact accessibility labels")
+    try expect(accountDetailSource.contains("modelCapabilitySummary(row.model)"), "account detail should show model capabilities")
+    try expect(accountDetailSource.contains("ModelRoutingResolver.sanitizedEndpoint"), "account detail should sanitize outbound proxy display")
+    let insightsSource = try fileText("App/ServiceInsightsView.swift")
+    try expect(insightsSource.contains("struct ModelPoolView"), "iOS should expose the service model pool")
+    try expect(insightsSource.contains("struct RoutingView"), "iOS should expose upstream routing inventory")
+    try expect(insightsSource.contains("LazyVGrid"), "insight summaries should use a compact phone grid")
+    try expect(insightsSource.contains("DisclosureGroup"), "routing mappings should collapse for phone-sized screens")
+    try expect(insightsSource.contains("该页面是配置清单，不代表每条路由当前都可用"), "routing UI should not imply configured routes are live")
+    try expect(insightsSource.contains(".privacySensitive(isSensitive)"), "routing endpoints and notes should be privacy-sensitive")
+    let metricsSource = try fileText("Sources/CPAKit/CPADashboardMetrics.swift")
+    try expect(metricsSource.contains("enum ProviderQuotaMetricKind"), "dashboard metrics should model provider-specific quota slots")
+    try expect(metricsSource.contains("AccountHealthRatio"), "dashboard metrics should separate connection health from quota balance")
+    let routingSource = try fileText("Sources/CPAKit/CPARoutingModels.swift")
+    try expect(routingSource.contains("sanitizedEndpoint"), "routing snapshots should sanitize endpoint credentials and query data")
+    try expect(routingSource.contains("forceModelPrefix"), "routing resolution should honor global prefix policy")
+    let configSource = try fileText("Sources/CPAKit/CPAConfigChannels.swift")
+    try expect(configSource.contains("case interactions = \"interactions-api-key\""), "config channels should include interactions API keys")
+    try expect(configSource.contains("maskedSecret"), "config-channel credentials should never expose full secrets")
+    let clientRoutingSource = try fileText("Sources/CPAKit/CPAClientRouting.swift")
+    try expect(clientRoutingSource.contains("fetchModelRoutingSnapshot"), "client should fetch a routing snapshot")
+    try expect(clientRoutingSource.contains("auth-files/download"), "routing should read per-account metadata only for safe file-backed auth entries")
+    let apiKeysClientSource = try fileText("Sources/CPAKit/CPAClientAPIKeys.swift")
+    try expect(apiKeysClientSource.contains("public func generateAPIKey"), "client should generate strong random api keys")
+    try expect(apiKeysClientSource.contains("SecRandomCopyBytes"), "generated api keys should use SecRandomCopyBytes")
+    try expect(apiKeysClientSource.contains("[\"old\": trimmed, \"new\": trimmed]"), "api-key append should reuse the server PATCH old==new semantics")
+    let apiKeysViewSource = try fileText("App/APIKeysView.swift")
+    try expect(apiKeysViewSource.contains("struct APIKeysView"), "iOS should expose an API key management screen")
+    try expect(apiKeysViewSource.contains("maskedSecret(key)"), "api keys should display masked")
+    try expect(apiKeysViewSource.contains("confirmationDialog"), "api key deletion should require confirmation")
+    try expect(apiKeysViewSource.contains("生成随机密钥并复制"), "api keys screen should offer one-tap generate-and-copy")
+    try expect(apiKeysViewSource.contains(".privacySensitive()"), "api key rows and input should be privacy-sensitive")
     let dashboardSource = try fileText("App/DashboardView.swift")
     try validateStableAccountIdentitySource(modelsSource: modelsSource, dashboardSource: dashboardSource)
     try expect(dashboardSource.contains("isDemoMode ? ManagementDashboard.demoModels(for: account.account) : []"), "demo navigation should provide bundled account-detail model metadata")
-    try expect(dashboardSource.contains("DashboardSummaryCard(summary: viewModel.summary)"), "dashboard should show the simplified Codex-scoped summary card")
-    try expect(dashboardSource.contains("Codex 5h") && dashboardSource.contains("Codex 7d"), "dashboard summary should label the 5h/7d averages as Codex-specific")
-    try expect(dashboardSource.contains("为 Codex 账号平均剩余额度"), "dashboard summary should clarify the 5h/7d average is Codex-only")
+    try expect(dashboardSource.contains("DashboardOverviewCard("), "dashboard should show the provider-aware health overview")
+    try expect(dashboardSource.contains("账号与渠道健康"), "dashboard overview should match the macOS health language")
+    try expect(dashboardSource.contains("ProviderPulseTile"), "dashboard should show compact provider health and quota tiles")
+    try expect(dashboardSource.contains("section.healthRatio.displayValue"), "provider headers should show healthy/total counts")
+    try expect(dashboardSource.contains("section.quotaAverages"), "provider headers should use provider-specific quota averages")
+    try expect(dashboardSource.contains("ModelPoolView") && dashboardSource.contains("RoutingView"), "dashboard overflow menu should expose model-pool and routing screens")
+    try expect(dashboardSource.contains("APIKeysView"), "dashboard overflow menu should expose API key management")
     try expect(dashboardSource.contains("quotaResetText(window)"), "dashboard account rows should show quota reset timing")
-    try expect(dashboardSource.contains("account.dashboardQuotaWindows"), "dashboard account rows should show prioritized quota windows")
+    try expect(dashboardSource.contains("account.dashboardQuotaWindows"), "dashboard account rows should show provider-aware quota windows")
     try expect(dashboardSource.contains("HiddenQuotaWindowCountView"), "dashboard account rows should indicate hidden quota windows")
     try expect(dashboardSource.contains("ForEach(Array(windows.enumerated()), id: \\.offset)"), "dashboard quota rows should tolerate duplicate provider window IDs")
-    try expect(dashboardSource.contains("section.primaryAverage.map { \"5h \\(displayPercent($0))\" }"), "provider headers should show 5h quota averages")
-    try expect(dashboardSource.contains("section.weeklyAverage.map { \"7d \\(displayPercent($0))\" }"), "provider headers should show 7d quota averages")
-    try expect(dashboardSource.contains("section.lowestRemainingPercent.map { \"最低 \\(displayPercent($0))\" }"), "provider headers should show lowest remaining quota")
+    try expect(dashboardSource.contains("if let remainingPercent = window.remainingPercent"), "dashboard should hide unknown quota progress bars")
     try expect(viewHelpersSource.contains("Label(resetText, systemImage: \"clock\")"), "quota metadata should show reset timing with a clock label")
     try expect(dashboardSource.contains("QuotaWindowMetadataLabels(window: window, font: .caption2.weight(.medium))"), "dashboard quota metadata should adapt on narrow screens")
     try expect(dashboardSource.contains("Text(projectID)") && dashboardSource.contains(".truncationMode(.middle)"), "dashboard account rows should middle-truncate long project IDs")
@@ -2002,7 +2411,7 @@ func runValidation() async throws {
     try expect(dashboardViewModelSource.contains("snapshot = nil"), "dashboard refresh should clear stale snapshots for a new connection")
     try expect(dashboardViewModelSource.contains("private func isSameMonitoringTarget"), "dashboard should distinguish server/key changes from refresh setting changes")
     try expect(dashboardViewModelSource.contains("activeConnection.baseURL == connection.baseURL"), "dashboard should keep live quota when only non-target settings change")
-    try expect(dashboardViewModelSource.contains("if !isSameTarget {\n            clearFilters()"), "dashboard should reset filters when switching monitoring targets")
+    try expect(dashboardViewModelSource.contains("clearFilters()"), "dashboard should reset filters when switching monitoring targets")
     try expect(dashboardViewModelSource.contains("displayErrorMessage(error.localizedDescription, limit: 180)"), "dashboard refresh errors should be compact")
     try expect(dashboardViewModelSource.contains("刷新失败，继续显示上次数据"), "dashboard refresh errors should clarify when stale data remains visible")
     try expect(dashboardViewModelSource.contains("func applyAccountQuota(_ quota: AccountQuota)"), "dashboard view model should apply per-account refreshed quota")
@@ -2010,60 +2419,31 @@ func runValidation() async throws {
     try expect(dashboardViewModelSource.contains("func clearFilters()"), "dashboard view model should support clearing filters")
     let settingsSource = try fileText("App/SettingsView.swift")
     try expect(settingsSource.contains("var onPreview: (() -> Void)?"), "settings should accept a demo action callback")
-    try expect(settingsSource.contains("if let onPreview"), "settings should show demo action only when the dashboard provides one")
-    try expect(settingsSource.contains("Label(\"查看演示面板\", systemImage: \"rectangle.on.rectangle\")"), "settings should expose demo mode after connection setup")
-    try expect(settingsSource.contains("低额度提醒"), "settings should expose local quota alerts")
-    try expect(settingsSource.contains("showsHTTPWarning"), "settings should warn before saving a local HTTP connection")
-    try expect(settingsSource.contains("当前连接使用 HTTP，请只在可信网络中使用。"), "settings HTTP warning should match setup guidance")
-    try expect(settingsSource.contains("关注阈值"), "settings should expose the dashboard attention threshold")
-    try expect(settingsSource.contains("title: \"通知权限\""), "settings should show notification delivery status")
-    try expect(settingsSource.contains("通知显示账号名称"), "settings should make account-name notification text opt-in")
-    try expect(settingsSource.contains("title: \"后台刷新\""), "settings should show Background App Refresh status with low-quota alerts")
-    try expect(settingsSource.contains("backgroundRefreshStatusText"), "settings should render localized Background App Refresh status")
-    try expect(settingsSource.contains("backgroundRefreshWarningText"), "settings should warn when Background App Refresh is denied or restricted")
-    try expect(settingsSource.contains("@MainActor\n    private var backgroundRefreshStatusText"), "settings should read UIApplication background refresh state on the main actor")
-    try expect(settingsSource.contains("@MainActor\n    private var backgroundRefreshStatusDiagnosticsText"), "settings diagnostics should read UIApplication background refresh state on the main actor")
-    try expect(settingsSource.contains("@MainActor\n    private var backgroundRefreshWarningText"), "settings background refresh warning should read UIApplication state on the main actor")
-    try expect(settingsSource.contains("openAppSettings()"), "settings should offer an app settings shortcut for background refresh recovery")
-    try expect(settingsSource.contains("打开通知设置"), "settings should offer recovery for denied notification permission")
-    try expect(settingsSource.contains("UIApplication.openNotificationSettingsURLString"), "settings should deep-link to iOS notification settings when available")
-    try expect(settingsSource.contains("UIApplication.openSettingsURLString"), "settings should deep-link to iOS notification settings")
-    try expect(settingsSource.contains("@MainActor\n    private func openAppSettings()"), "settings app-settings shortcut should run on the main actor")
-    try expect(settingsSource.contains("@MainActor\n    private func openSystemNotificationSettings()"), "settings notification-settings shortcut should run on the main actor")
-    try expect(settingsSource.contains("struct SettingsValueRow"), "settings should use a responsive value row for compact form controls")
-    try expect(settingsSource.contains("SettingsValueRow("), "settings steppers should use the responsive value row")
-    try expect(settingsSource.contains("ViewThatFits(in: .horizontal)"), "settings value rows should stack on narrow screens")
-    try expect(settingsSource.contains(".accessibilityLabel(\"\\(title)，\\(value)\")"), "settings value rows should expose compact accessibility labels")
-    try expect(settingsSource.contains("confirmationDialog(\"清除连接？\""), "settings should confirm before clearing saved credentials")
-    try expect(settingsSource.contains("Keychain 管理密钥"), "clear-connection confirmation should mention the saved management key")
-    try expect(settingsSource.contains("TextField(\"服务器\", text: $baseURL)") && settingsSource.contains(".privacySensitive()\n                    SecureField"), "settings should mark server URL input privacy-sensitive")
-    try expect(settingsSource.contains(".textContentType(.password)") && settingsSource.contains(".privacySensitive()"), "settings should mark management key input privacy-sensitive")
-    try expect(settingsSource.contains("private var canSave"), "settings should gate empty save attempts")
-    try expect(settingsSource.contains(".disabled(!canSave)"), "settings save button should be disabled until required fields are present")
-    try expect(settingsSource.contains("displayErrorMessage(error.localizedDescription, limit: 180)"), "settings errors should be compact on small screens")
-    try expect(settingsSource.contains("savedAlertsEnabled = false"), "settings should save core settings even if notification permission is denied")
-    try expect(settingsSource.contains("do {\n                    let authorized = try await QuotaAlertNotifier.requestAuthorization()"), "settings should isolate notification authorization failures from connection saving")
-    try expect(settingsSource.contains("quotaAlertsEnabled = false"), "settings should turn off local alerts when notification permission is denied")
-    try expect(settingsSource.contains("managementKey = \"\""), "settings should clear the transient management key field after a verified save")
-    try expect(settingsSource.contains("复制诊断信息"), "settings should expose support diagnostics copy")
-    try expect(settingsSource.contains("await copyDiagnostics()"), "settings diagnostics copy should refresh asynchronous capability state")
-    try expect(settingsSource.contains("UIPasteboard.general.string = diagnostics"), "settings should copy diagnostics to the iOS pasteboard")
-    try expect(settingsSource.contains("Management Key Included: no"), "settings diagnostics should explicitly omit management key values")
-    try expect(settingsSource.contains("Generated At: \\(diagnosticsTimestamp())"), "settings diagnostics should include a generation timestamp")
-    try expect(settingsSource.contains("ISO8601DateFormatter().string(from: Date())"), "settings diagnostics timestamp should use ISO-8601")
-    try expect(settingsSource.contains("Stored Management Key Present"), "settings diagnostics should only report whether a saved key exists")
-    try expect(settingsSource.contains("Background Refresh Status: \\(backgroundRefreshStatusDiagnosticsText)"), "settings diagnostics should include Background App Refresh status")
-    try expect(settingsSource.contains("notificationCapabilitySummary?.diagnosticsLines"), "settings diagnostics should include notification capability lines")
-    try expect(settingsSource.contains("refreshNotificationCapabilitySummary()"), "settings should refresh notification diagnostics")
-    try expect(settingsSource.contains("await refreshNotificationCapabilitySummary()\n        let diagnostics = supportDiagnostics()"), "settings should refresh notification diagnostics immediately before copying")
-    try expect(settingsSource.contains("components.password = nil"), "settings diagnostics should remove URL credentials")
-    try expect(settingsSource.contains("连接和刷新设置已保存"), "settings should tell the user that non-notification settings were saved")
-    try expect(settingsSource.contains("通知设置暂不可用，低额度提醒已关闭"), "settings should save core settings when notification authorization throws")
-    try expect(settingsSource.contains("通知权限不可用，低额度提醒已关闭"), "settings should explain when revoked notification permission disables alerts")
-    try expect(settingsSource.contains("loadStoredSettings()"), "settings should reload saved values after permission reconciliation")
-    try expect(settingsSource.contains("notificationPermissionDenied ? .orange : .red"), "settings should distinguish notification warnings from connection errors")
-    try expect(settingsSource.contains("} else {\n                notificationPermissionDenied = false"), "settings should not misclassify save failures as notification warnings")
-    try expect(settingsSource.contains("if notificationPermissionDenied {\n                isChecking = false\n                return"), "settings should keep the sheet open after saving without notification permission")
+    try expect(settingsSource.contains("Label(\"查看演示面板\", systemImage: \"rectangle.on.rectangle\")"), "settings should expose demo mode")
+    try expect(settingsSource.contains("ForEach(connectionStore.profiles)"), "settings should list every saved service")
+    try expect(settingsSource.contains("Label(\"添加服务\", systemImage: \"plus.circle.fill\")"), "settings should add services")
+    try expect(settingsSource.contains("ServiceEditorView(mode: .edit(profile))"), "settings should edit services on a dedicated phone screen")
+    try expect(settingsSource.contains("TextField(\"服务器\", text: $baseURL)"), "service editor should expose the server URL")
+    try expect(settingsSource.contains(".privacySensitive()"), "service credentials and endpoints should be privacy-sensitive")
+    try expect(settingsSource.contains("showsHTTPWarning"), "service editor should warn before saving local HTTP")
+    try expect(settingsSource.contains("关注阈值"), "service editor should expose the attention threshold")
+    try expect(settingsSource.contains("低额度提醒"), "service editor should expose local quota alerts")
+    try expect(settingsSource.contains("通知显示账号名称"), "notification account names should remain opt-in")
+    try expect(settingsSource.contains("title: \"后台刷新\""), "service editor should show Background App Refresh status")
+    try expect(settingsSource.contains("backgroundRefreshWarningText"), "service editor should explain unavailable background refresh")
+    try expect(settingsSource.contains("private var canSave"), "service editor should gate invalid saves")
+    try expect(settingsSource.contains(".disabled(!canSave)"), "save should stay disabled without a URL and key")
+    try expect(settingsSource.contains("fetchDashboard(includeLiveUsage: false)"), "service editor should verify management access before saving")
+    try expect(settingsSource.contains("connectionStore.addProfile"), "service editor should add an independent service profile")
+    try expect(settingsSource.contains("connectionStore.updateProfile"), "service editor should update an independent service profile")
+    try expect(settingsSource.contains("confirmationDialog(\"删除该服务？\""), "service deletion should require confirmation")
+    try expect(settingsSource.contains("Keychain 管理密钥"), "service deletion should explain Keychain cleanup")
+    try expect(settingsSource.contains("复制诊断信息"), "settings should expose support diagnostics")
+    try expect(settingsSource.contains("Service Count:"), "diagnostics should summarize multi-service state")
+    try expect(settingsSource.contains("Management Key Included: no"), "diagnostics should explicitly omit management key values")
+    try expect(settingsSource.contains("notificationCapabilitySummary?.diagnosticsLines"), "diagnostics should include notification capability state")
+    try expect(settingsSource.contains("UIApplication.openNotificationSettingsURLString"), "settings should deep-link to notification settings")
+    try expect(settingsSource.contains("ViewThatFits(in: .horizontal)"), "settings value rows should adapt on narrow screens")
     let notifierSource = try fileText("App/QuotaAlertNotifier.swift")
     try expect(notifierSource.contains("UNUserNotificationCenter"), "quota alerts should use local notifications")
     try expect(notifierSource.contains("requestAuthorization"), "quota alerts should request notification permission")
@@ -2117,7 +2497,7 @@ func runValidation() async throws {
     try expect(backgroundRefreshSource.contains("using: DispatchQueue.main"), "background refresh launch handler should run on the main queue")
     try expect(backgroundRefreshSource.contains("BGAppRefreshTaskRequest"), "background refresh scheduler should submit app refresh requests")
     try expect(backgroundRefreshSource.contains("connection.quotaAlertsEnabled"), "background refresh should run only when low-quota alerts are enabled")
-    try expect(backgroundRefreshSource.contains("ConnectionStorage.disableQuotaAlerts()"), "background refresh should disable local alerts when notification permission is unavailable")
+    try expect(backgroundRefreshSource.contains("ConnectionStorage.disableQuotaAlertsForSelected()"), "background refresh should disable local alerts when notification permission is unavailable")
     try expect(backgroundRefreshSource.contains("cancel()\n        guard let connection"), "background refresh should replace existing pending task requests when rescheduling")
     try expect(backgroundRefreshSource.contains("fetchDashboard(includeLiveUsage: true)"), "background refresh should sync live quota before alerting")
     try expect(backgroundRefreshSource.contains("QuotaAlertNotifier.notifyIfNeeded"), "background refresh should generate the same local low-quota alerts")
@@ -2177,12 +2557,20 @@ func runValidation() async throws {
       "body": "{\\"plan_type\\":\\"plus\\",\\"rate_limit\\":{\\"primary_window\\":{\\"used_percent\\":40,\\"limit_window_seconds\\":18000},\\"secondary_window\\":{\\"used_percent\\":75,\\"limit_window_seconds\\":604800}}}"
     }
     """.data(using: .utf8)!
-    let liveSession = QueueSession(payloads: [whamEnvelope])
+    let liveSession = QueueSession(payloads: [whamEnvelope, whamEnvelope])
     let liveClient = CPAClient(baseURL: try CPABaseURLNormalizer.normalize("https://proxy.example.com"), managementKey: "secret", session: liveSession)
     let liveQuota = await liveClient.fetchAccountQuota(for: flexibleAccount)
     try expect(liveQuota.errorMessage == nil, "live quota fetch returned error: \(liveQuota.errorMessage ?? "")")
     try expect(liveQuota.primaryRemainingPercent == 60, "live quota primary remaining failed")
-    let liveRequest = try require(liveSession.requests.first, "live quota request missing")
+    let liveRequests = await liveSession.requests
+    let liveRequest = try require(liveRequests.first { request in
+        guard let body = request.httpBody,
+              let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        else {
+            return false
+        }
+        return object["url"] as? String == "https://chatgpt.com/backend-api/wham/usage"
+    }, "live quota request missing")
     try expect(liveRequest.httpMethod == "POST", "live quota should use POST")
     try expect(liveRequest.url?.absoluteString == "https://proxy.example.com/v0/management/api-call", "live quota URL failed")
     let liveBodyData = try require(liveRequest.httpBody, "live quota body missing")
@@ -2214,21 +2602,32 @@ func runValidation() async throws {
     {
       "status_code": 200,
       "body": {
-        "models": {
-          "claude-sonnet-4-6": {
-            "displayName": "Claude Sonnet 4.6",
-            "quotaInfo": {
-              "remainingFraction": 0.4
-            }
+        "groups": [
+          {
+            "displayName": "Claude/GPT",
+            "buckets": [
+              {
+                "bucketId": "five-hour",
+                "displayName": "5h",
+                "window": "5h",
+                "remainingFraction": 0.4
+              }
+            ]
           }
-        }
+        ]
       }
     }
     """.data(using: .utf8)!
-    let antigravitySession = QueueSession(payloads: [
-        Data(#"{"project_id":"project-from-auth-file"}"#.utf8),
-        antigravityEnvelope
-    ])
+    let antigravitySubscriptionEnvelope = Data(#"{"status_code":200,"body":{"paidTier":{"id":"g1-pro-tier","name":"Google AI Pro"}}}"#.utf8)
+    let antigravitySession = UpstreamRouteSession(
+        managementRoutes: [
+            "/v0/management/auth-files/download": Data(#"{"project_id":"project-from-auth-file"}"#.utf8)
+        ],
+        upstreamRoutes: [
+            "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary": antigravityEnvelope,
+            "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist": antigravitySubscriptionEnvelope
+        ]
+    )
     let antigravityClient = CPAClient(
         baseURL: try CPABaseURLNormalizer.normalize("https://proxy.example.com"),
         managementKey: "secret",
@@ -2237,11 +2636,21 @@ func runValidation() async throws {
     let antigravityQuota = await antigravityClient.fetchAccountQuota(for: antigravityAccount)
     try expect(antigravityQuota.errorMessage == nil, "antigravity live quota returned error: \(antigravityQuota.errorMessage ?? "")")
     try expect(antigravityQuota.lowestRemainingPercent == 40, "antigravity live quota remaining failed")
+    let antigravityRequests = await antigravitySession.requests
     try expect(
-        antigravitySession.requests.first?.url?.absoluteString == "https://proxy.example.com/v0/management/auth-files/download?name=antigravity.json",
+        antigravityRequests.contains {
+            $0.url?.absoluteString == "https://proxy.example.com/v0/management/auth-files/download?name=antigravity.json"
+        },
         "antigravity project fallback should download the auth file"
     )
-    let antigravityRequest = try require(antigravitySession.requests.dropFirst().first, "antigravity api-call request missing")
+    let antigravityRequest = try require(antigravityRequests.first { request in
+        guard let body = request.httpBody,
+              let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        else {
+            return false
+        }
+        return object["url"] as? String == "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
+    }, "antigravity api-call request missing")
     let antigravityBodyData = try require(antigravityRequest.httpBody, "antigravity api-call body missing")
     let antigravityBody = try require(
         JSONSerialization.jsonObject(with: antigravityBodyData) as? [String: Any],
@@ -2267,7 +2676,7 @@ func runValidation() async throws {
     let objectBodyClient = CPAClient(
         baseURL: try CPABaseURLNormalizer.normalize("https://proxy.example.com"),
         managementKey: "secret",
-        session: QueueSession(payloads: [objectBodyEnvelope])
+        session: QueueSession(payloads: [objectBodyEnvelope, objectBodyEnvelope])
     )
     let objectBodyQuota = await objectBodyClient.fetchAccountQuota(for: flexibleAccount)
     try expect(objectBodyQuota.errorMessage == nil, "object body live quota returned error: \(objectBodyQuota.errorMessage ?? "")")
@@ -2277,14 +2686,14 @@ func runValidation() async throws {
     let emptySuccessClient = CPAClient(
         baseURL: try CPABaseURLNormalizer.normalize("https://proxy.example.com"),
         managementKey: "secret",
-        session: QueueSession(payloads: [emptySuccessEnvelope])
+        session: QueueSession(payloads: [emptySuccessEnvelope, emptySuccessEnvelope])
     )
     let emptySuccessQuota = await emptySuccessClient.fetchAccountQuota(for: flexibleAccount)
-    try expect(emptySuccessQuota.errorMessage?.contains("empty quota response") == true, "empty 2xx live quota body should surface as a decoding error")
+    try expect(emptySuccessQuota.errorMessage?.contains("empty Codex quota") == true, "empty 2xx live quota body should surface as a decoding error")
     try expect(emptySuccessQuota.errorMessage?.contains("HTTP 200") == false, "empty 2xx live quota body should not be reported as an HTTP 200 failure")
 
     let invalidEnvelope = #"{"body":"{}"}"#.data(using: .utf8)!
-    let invalidSession = QueueSession(payloads: [invalidEnvelope])
+    let invalidSession = QueueSession(payloads: [invalidEnvelope, invalidEnvelope])
     let invalidClient = CPAClient(baseURL: try CPABaseURLNormalizer.normalize("https://proxy.example.com"), managementKey: "secret", session: invalidSession)
     let invalidQuota = await invalidClient.fetchAccountQuota(for: flexibleAccount)
     try expect(invalidQuota.errorMessage?.contains("status_code") == true, "missing status_code should be surfaced")
@@ -2303,7 +2712,7 @@ func runValidation() async throws {
     let providerErrorClient = CPAClient(
         baseURL: try CPABaseURLNormalizer.normalize("https://proxy.example.com"),
         managementKey: "secret",
-        session: QueueSession(payloads: [providerErrorEnvelope])
+        session: QueueSession(payloads: [providerErrorEnvelope, providerErrorEnvelope])
     )
     let providerErrorQuota = await providerErrorClient.fetchAccountQuota(for: flexibleAccount)
     try expect(providerErrorQuota.errorMessage?.contains("provider unavailable") == true, "api-call envelope errors should extract nested provider messages")
@@ -2390,12 +2799,12 @@ func runValidation() async throws {
         try await Task.sleep(nanoseconds: 50_000_000)
     }
     let retryCancelInitialCount = await retryCancelSession.requestCount
-    try expect(retryCancelInitialCount == 1, "retry cancellation test did not start the first live quota request")
+    try expect(retryCancelInitialCount == 2, "retry cancellation test should start usage and optional reset-credit requests")
     retryCancelTask.cancel()
     _ = await retryCancelTask.value
     try await Task.sleep(nanoseconds: 800_000_000)
     let retryCancelFinalCount = await retryCancelSession.requestCount
-    try expect(retryCancelFinalCount == 1, "cancelled live quota retry should not issue a second api-call request")
+    try expect(retryCancelFinalCount == 2, "cancelled live quota refresh should not retry either upstream request")
 
     let modelsPayload = #"{"models":[{"id":"model-a"}]}"#.data(using: .utf8)!
     let session = CapturingSession(payload: modelsPayload)

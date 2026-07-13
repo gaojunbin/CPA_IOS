@@ -2,13 +2,18 @@
 
 SwiftUI iOS client for monitoring CLIProxyAPI account status and live quota.
 
-The app mirrors the CPA macOS status bar workflow on iPhone/iPad:
+The app mirrors the CPA macOS status bar workflow on iPhone, with navigation and responsive cards adapted for a phone-sized screen:
 
 - Connect to one or more CLIProxyAPI services, each with its own management URL and key, and switch between them instantly from the dashboard title's dropdown (see Multiple Services).
 - Preview the finished dashboard with bundled demo data before saving any credentials, or reopen the demo from Settings later.
 - Demo mode covers Codex, Claude, Antigravity, Kimi, Grok, and a disabled Gemini account.
 - Demo account detail includes bundled model metadata and runtime badges, so review can inspect model status without a live server.
-- Show Codex 5h/7d remaining-quota averages as the headline metric, scoped to Codex accounts only, with a caption clarifying that other providers report their own quota shapes per card.
+- Show healthy/total account status as the headline signal, matching macOS v1.3.0 without treating low remaining quota as a connection failure.
+- Show provider-specific equal-weight quota averages: Codex and Claude 5h/7d, Antigravity Gemini and Claude/GPT 5h/7d, and Grok weekly/monthly credits.
+- Open a phone-adapted **Model Pool** screen with channel grouping, credential coverage, descriptions, context/output limits, modalities, web-search, and thinking capabilities.
+- Open a phone-adapted **Upstream Model Routing** screen with strategy, force-prefix policy, config/OAuth routes, route pools, priorities, exclusions, sanitized endpoints, and per-account overrides.
+- Open a phone-adapted **API Keys** screen that lists the service's proxy API keys masked, copies full values on demand, adds typed keys, generates-and-copies a strong random key in one tap, and deletes keys behind a confirmation dialog.
+- Treat the routing screen as configuration inventory rather than proof that every configured route is currently live.
 - Pin low-quota, cooling, and error accounts near the top of the dashboard.
 - Use one configurable attention threshold for optional low-quota local alerts.
 - Sort local alert candidates with that same threshold.
@@ -23,7 +28,7 @@ The app mirrors the CPA macOS status bar workflow on iPhone/iPad:
 - Show quota reset timing directly in account rows when the upstream provider returns it.
 - Display reset countdowns and provider quota windows with localized Chinese timing text.
 - Show provider-level 5h/7d averages and lowest remaining quota in each provider section header.
-- Render each channel's quota from the live web payload instead of hard-coded fields, so Codex shows 5h/7d windows, Grok shows credit balance, Antigravity shows per-model quota, and so on.
+- Render each channel's quota from live upstream payloads: Codex rolling/monthly/code-review/reset-credit windows, Antigravity groups/buckets plus subscription credits with a legacy model fallback, Claude usage/profile, Kimi usage, and Grok weekly/product/monthly/PAYG windows.
 - Coalesce refresh triggers so manual refresh, foreground resume, and timer refresh do not stack duplicate sync jobs.
 - Show compact localized connection and network errors for unreachable servers.
 - Surface provider runtime status, model cooldowns, recent request activity, and account metadata in account detail.
@@ -57,7 +62,9 @@ The app can monitor multiple CLIProxyAPI services ("号池" / pools) and switch 
   - `remote-management.secret-key` configured, or `MANAGEMENT_PASSWORD` set
 - The app sends `Authorization: Bearer <management-key>`.
 - Management requests use an ephemeral URLSession with no persistent URL cache or cookie storage, plus explicit no-store request headers.
-- Live quota requires `/v0/management/api-call`. Supported quota providers currently follow the macOS client: Codex/OpenAI WHAM, Claude, Antigravity, Kimi, and xAI/Grok.
+- Live quota requires `/v0/management/api-call`. Supported provider contracts match macOS v1.3.0: Codex/OpenAI WHAM plus reset-credit metadata, Claude usage/profile, Antigravity quota summary/subscription with legacy fallback, Kimi usage, and xAI/Grok weekly plus monthly billing.
+- Model and routing insights additionally read `/auth-files/models`, config-channel endpoints, `/model-definitions/:channel`, OAuth alias/exclusion settings, `/routing/strategy`, `/force-model-prefix`, and safe file-backed `/auth-files/download` metadata.
+- API key management uses `GET/PATCH/DELETE /v0/management/api-keys` with the server's `old == new` append semantics; generated keys use `SecRandomCopyBytes` and are only placed on the pasteboard by an explicit user action.
 - Use HTTPS for internet-facing servers. The app rejects public `http://` URLs; HTTP is accepted only for localhost, private IP, link-local, single-label LAN names, and `.local`/`.lan`/`.home.arpa` LAN endpoints.
 
 The app accepts a server origin such as `https://cpa.example.com`, a copied panel URL such as `https://cpa.example.com/management.html#/quota`, or a copied management API URL such as `https://cpa.example.com/v0/management/auth-files`.
