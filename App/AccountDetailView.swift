@@ -340,7 +340,10 @@ struct ModelCooldownSection: View {
     var body: some View {
         DetailSection(title: "模型状态", systemImage: "hourglass") {
             if account.account.activeModelCooldowns.isEmpty {
-                EmptyStateView(title: "没有模型限制", systemImage: "checkmark.seal")
+                EmptyStateView(
+                    title: account.account.hasModelRuntimeStatus ? "未报告模型限制" : "服务端未提供模型限制状态",
+                    systemImage: "info.circle"
+                )
             } else {
                 VStack(spacing: 10) {
                     ForEach(account.account.activeModelCooldowns, id: \.model) { item in
@@ -626,7 +629,7 @@ enum ModelRuntimeKind: Equatable {
 
     init(state: ModelState?) {
         guard let state else {
-            self = .available
+            self = .unknown
             return
         }
         let status = state.status?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
@@ -646,7 +649,7 @@ enum ModelRuntimeKind: Equatable {
             self = .cooling
         } else if status.contains("pending") || status.contains("refresh") {
             self = .pending
-        } else if status.isEmpty || status == "active" || status == "available" || status == "ok" {
+        } else if status == "active" || status == "available" || status == "ok" {
             self = .available
         } else {
             self = .unknown

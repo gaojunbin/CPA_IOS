@@ -7,6 +7,18 @@ public enum APIKeyChannelKind: String, CaseIterable, Sendable {
     case interactions = "interactions-api-key"
     case vertex = "vertex-api-key"
 
+    var modelType: String {
+        self == .codex ? "openai" : definitionsChannel
+    }
+
+    var modelOwner: String {
+        switch self {
+        case .codex: return "openai"
+        case .claude: return "anthropic"
+        case .gemini, .interactions, .vertex: return "google"
+        }
+    }
+
     public var managementPath: String { "/v0/management/\(rawValue)" }
 
     public var definitionsChannel: String {
@@ -22,6 +34,7 @@ public enum APIKeyChannelKind: String, CaseIterable, Sendable {
 public struct APIKeyChannelEntry: Equatable, Sendable {
     public let overrideModelIDs: [String]
     public let overrideRoutes: [ModelRouteDefinition]
+    public let overrideModels: [CPAModelDefinition]
     public let excludedPatterns: [String]
     public let prefix: String?
     public let maskedKey: String?
@@ -36,11 +49,13 @@ public struct APIKeyChannelEntry: Equatable, Sendable {
         maskedKey: String? = nil,
         baseURL: String? = nil,
         overrideRoutes: [ModelRouteDefinition] = [],
+        overrideModels: [CPAModelDefinition] = [],
         priority: Int? = nil,
         proxyURL: String? = nil
     ) {
         self.overrideModelIDs = overrideModelIDs
         self.overrideRoutes = overrideRoutes
+        self.overrideModels = overrideModels
         self.excludedPatterns = excludedPatterns
         self.prefix = prefix
         self.maskedKey = maskedKey
@@ -317,16 +332,16 @@ public enum ConfigChannelSynthesizer {
                 .compactMap { firstString($0) }
             let routes = mappingRoutes(firstArray(item["models"]), prefix: prefix, source: providerKey)
                 .filter { !matchesExcluded($0.alias, patterns: excluded) }
-            let models = deduplicatedIDs(
-                routes.flatMap { withPrefixVariants($0.alias, prefix: $0.prefix) }
-            ).map {
-                CPAModelDefinition(
-                    id: $0,
-                    displayName: nil,
+            let models = deduplicatedModelDefinitions(
+                ConfiguredModelMetadata.definitions(
+                    firstArray(item["models"]),
                     type: "openai-compatibility",
-                    ownedBy: name
-                )
-            }
+                    ownedBy: name,
+                    useUpstreamName: false
+                ).filter { !matchesExcluded($0.id, patterns: excluded) }.flatMap { model in
+                    withPrefixVariants(model.id, prefix: prefix).map { model.withID($0) }
+                }
+            )
 
             let keyEntries = firstArray(item["api-key-entries"], item["apiKeyEntries"]) ?? []
             let credentials: [(maskedKey: String?, proxyURL: String?)] = keyEntries.isEmpty
@@ -387,7 +402,7 @@ public enum ConfigChannelSynthesizer {
                 firstArray(item["models"]),
                 prefix: prefix,
                 source: kind.rawValue
-            ).filter { !matchesExcluded($0.alias, patterns: excluded) }
+            )
             return APIKeyChannelEntry(
                 overrideModelIDs: deduplicatedIDs(routes.map(\.alias)),
                 excludedPatterns: excluded,
@@ -395,6 +410,12 @@ public enum ConfigChannelSynthesizer {
                 maskedKey: firstString(item["api-key"], item["apiKey"]).map(maskedSecret),
                 baseURL: firstString(item["base-url"], item["baseURL"], item["baseUrl"]),
                 overrideRoutes: routes,
+                overrideModels: ConfiguredModelMetadata.definitions(
+                    firstArray(item["models"]),
+                    type: kind.modelType,
+                    ownedBy: kind.modelOwner,
+                    useUpstreamName: true
+                ),
                 priority: integerValue(item["priority"]),
                 proxyURL: firstString(item["proxy-url"], item["proxyURL"], item["proxyUrl"])
             )
@@ -410,51 +431,27 @@ public enum ConfigChannelSynthesizer {
             let hasOverrides = !entry.overrideRoutes.isEmpty || !entry.overrideModelIDs.isEmpty
             let routes: [ModelRouteDefinition]
             let baseModels: [CPAModelDefinition]
-
             if hasOverrides {
-                routes = entry.overrideRoutes.isEmpty
+                let configuredRoutes = entry.overrideRoutes.isEmpty
                     ? entry.overrideModelIDs.map {
-                        ModelRouteDefinition(
-                            name: $0,
-                            alias: $0,
-                            prefix: entry.prefix,
-                            source: kind.rawValue
-                        )
+                        ModelRouteDefinition(name: $0, alias: $0, prefix: entry.prefix, source: kind.rawValue)
                     }
                     : entry.overrideRoutes
-                baseModels = deduplicatedIDs(routes.map(\.alias)).map {
-                    CPAModelDefinition(id: $0, ownedBy: kind.definitionsChannel)
-                }
+                routes = configuredRoutes.filter { !matchesExcluded($0.alias, patterns: entry.excludedPatterns) }
+                let configuredModels = entry.overrideModels.isEmpty
+                    ? deduplicatedIDs(configuredRoutes.map(\.alias)).map {
+                        CPAModelDefinition(id: $0, ownedBy: kind.definitionsChannel)
+                    }
+                    : entry.overrideModels
+                baseModels = configuredModels.filter { !matchesExcluded($0.id, patterns: entry.excludedPatterns) }
             } else {
-                baseModels = staticModels.filter {
-                    !matchesExcluded($0.id, patterns: entry.excludedPatterns)
-                }
+                baseModels = staticModels.filter { !matchesExcluded($0.id, patterns: entry.excludedPatterns) }
                 routes = baseModels.map {
-                    ModelRouteDefinition(
-                        name: $0.id,
-                        alias: $0.id,
-                        prefix: entry.prefix,
-                        source: kind.rawValue
-                    )
+                    ModelRouteDefinition(name: $0.id, alias: $0.id, prefix: entry.prefix, source: kind.rawValue)
                 }
             }
-
             let models = deduplicatedModelDefinitions(baseModels.flatMap { model in
-                withPrefixVariants(model.id, prefix: entry.prefix).map { id in
-                    CPAModelDefinition(
-                        id: id,
-                        displayName: id == model.id ? model.displayName : nil,
-                        type: model.type,
-                        ownedBy: model.ownedBy,
-                        description: model.description,
-                        contextLength: model.contextLength,
-                        maxCompletionTokens: model.maxCompletionTokens,
-                        supportedInputModalities: model.supportedInputModalities,
-                        supportedOutputModalities: model.supportedOutputModalities,
-                        supportsWebSearch: model.supportsWebSearch,
-                        thinking: model.thinking
-                    )
-                }
+                withPrefixVariants(model.id, prefix: entry.prefix).map { model.withID($0) }
             })
             let account = CPAAccount(
                 id: "\(kind.rawValue)#\(index)",

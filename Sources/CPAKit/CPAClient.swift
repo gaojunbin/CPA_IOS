@@ -76,7 +76,8 @@ public final class CPAClient: Sendable {
     }
 
     public func fetchModels(for account: CPAAccount) async throws -> [CPAModelDefinition] {
-        let queryName = account.name.isEmpty ? account.id : account.name
+        // Multiple virtual accounts can share a filename; the server also accepts the unique auth ID.
+        let queryName = account.id.isEmpty ? account.name : account.id
         let response: (ModelsResponse, HTTPURLResponse) = try await request(
             path: "/v0/management/auth-files/models",
             queryItems: [URLQueryItem(name: "name", value: queryName)]

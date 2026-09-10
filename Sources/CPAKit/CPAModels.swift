@@ -737,6 +737,7 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
     public let nextRefreshAfter: Date?
     public let quota: QuotaState?
     public let modelStates: [String: ModelState]
+    public let hasModelRuntimeStatus: Bool
     public let lastError: ProviderError?
     public let idToken: CodexIDTokenClaims?
     public let antigravityCredits: AntigravityCredits?
@@ -853,6 +854,7 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
         nextRefreshAfter: Date? = nil,
         quota: QuotaState? = nil,
         modelStates: [String: ModelState] = [:],
+        hasModelRuntimeStatus: Bool = false,
         lastError: ProviderError? = nil,
         idToken: CodexIDTokenClaims? = nil,
         antigravityCredits: AntigravityCredits? = nil,
@@ -894,6 +896,7 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
         self.nextRefreshAfter = nextRefreshAfter
         self.quota = quota
         self.modelStates = modelStates
+        self.hasModelRuntimeStatus = hasModelRuntimeStatus || !modelStates.isEmpty
         self.lastError = lastError
         self.idToken = idToken
         self.antigravityCredits = antigravityCredits
@@ -989,6 +992,8 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
         nextRefreshAfter = try container.decodeFlexibleDateIfPresent(forKey: .nextRefreshAfter)
             ?? container.decodeFlexibleDateIfPresent(forKey: .nextRefreshAfterCamel)
         quota = try container.decodeIfPresent(QuotaState.self, forKey: .quota)
+        hasModelRuntimeStatus = try (container.contains(.modelStates) && !container.decodeNil(forKey: .modelStates))
+            || (container.contains(.modelStatesCamel) && !container.decodeNil(forKey: .modelStatesCamel))
         modelStates = try container.decodeIfPresent([String: ModelState].self, forKey: .modelStates)
             ?? container.decodeIfPresent([String: ModelState].self, forKey: .modelStatesCamel)
             ?? [:]
@@ -1559,7 +1564,7 @@ public extension CPAAccount {
             if let credits = antigravityCredits, credits.known {
                 return credits.available ? "Credits \(displayCredits(credits.creditAmount))" : "Credits 不足"
             }
-            return "额度可用"
+            return "账号就绪"
         case .cooling:
             if let activeModelIssueLine {
                 return activeModelIssueLine

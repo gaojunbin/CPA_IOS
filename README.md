@@ -1,5 +1,7 @@
 # CPA Panel iOS
 
+Compatibility baseline and audit evidence: [CPA_SYNC.md](CPA_SYNC.md). Contributor instructions: [AGENTS.md](AGENTS.md).
+
 SwiftUI iOS client for monitoring CLIProxyAPI account status and live quota.
 
 The app mirrors the CPA macOS status bar workflow on iPhone, with navigation and responsive cards adapted for a phone-sized screen:

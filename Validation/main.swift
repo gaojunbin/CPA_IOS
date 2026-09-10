@@ -762,6 +762,8 @@ func validateAPIKeyManagementEndToEnd() async throws {
 
 @MainActor
 func runValidation() async throws {
+    try validateConfiguredModels { try expect($0, $1) }
+    try validateManagementRuntimeCompatibility()
     try validateMacOSV130Parity()
     try await validateRoutingSnapshotEndToEnd()
     try await validateAPIKeyManagementEndToEnd()
@@ -2275,7 +2277,7 @@ func runValidation() async throws {
     try expect(accountDetailSource.contains("displayErrorMessage(error.localizedDescription, limit: 160)"), "account detail model errors should stay compact")
     try expect(accountDetailSource.contains("模型状态"), "account detail should label model errors and cooldowns together")
     try expect(accountDetailSource.contains("item.state.lastError?.message"), "account detail should show model last_error messages")
-    try expect(accountDetailSource.contains("没有模型限制"), "account detail empty model status text should include errors and cooldowns")
+    try expect(accountDetailSource.contains("服务端未提供模型限制状态"), "missing backend model status must not imply unrestricted models")
     try expect(accountDetailSource.contains("model.ownedBy"), "account detail should show model ownership metadata")
     try expect(accountDetailSource.contains("struct ModelListRow"), "account detail model list should use a dedicated responsive row")
     try expect(accountDetailSource.contains("struct ModelListRowModel"), "account detail model rows should merge model metadata with runtime state")
@@ -2809,10 +2811,15 @@ func runValidation() async throws {
     let modelsPayload = #"{"models":[{"id":"model-a"}]}"#.data(using: .utf8)!
     let session = CapturingSession(payload: modelsPayload)
     let client = CPAClient(baseURL: try CPABaseURLNormalizer.normalize("https://proxy.example.com/cpa/management.html#/quota"), managementKey: "secret", session: session)
+    for id in ["virtual-a", "virtual-b"] {
+        _ = try await client.fetchModels(for: CPAAccount(id: id, name: "shared.json", provider: "codex"))
+        let components = URLComponents(url: session.lastRequest!.url!, resolvingAgainstBaseURL: false)
+        try expect(components?.queryItems?.first { $0.name == "name" }?.value == id, "Shared filenames must not mix account model lists")
+    }
     _ = try await client.fetchModels(for: account)
     let modelURL = try require(session.lastRequest?.url?.absoluteString, "model request URL missing")
     try expect(
-        modelURL == "https://proxy.example.com/cpa/v0/management/auth-files/models?name=gemini.json",
+        modelURL == "https://proxy.example.com/cpa/v0/management/auth-files/models?name=auth-1",
         "subpath model URL failed: \(modelURL)"
     )
 }
