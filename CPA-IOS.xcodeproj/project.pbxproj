@@ -33,6 +33,7 @@
 		1A0000000000000000000124 /* CPAClientAPIKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000001A /* CPAClientAPIKeys.swift */; };
 		1A0000000000000000000125 /* APIKeysView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000000F /* APIKeysView.swift */; };
 		1A0000000000000000000126 /* ConfiguredModelMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000001B /* ConfiguredModelMetadata.swift */; };
+		1A0000000000000000000127 /* AccountCooldown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000002A /* AccountCooldown.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -64,6 +65,7 @@
 		1A000000000000000000001A /* CPAClientAPIKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPAClientAPIKeys.swift; sourceTree = "<group>"; };
 		1A0000000000000000000020 /* CPA-IOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "CPA-IOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A000000000000000000001B /* ConfiguredModelMetadata.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfiguredModelMetadata.swift; sourceTree = "<group>"; };
+		1A000000000000000000002A /* AccountCooldown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountCooldown.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -117,6 +119,7 @@
 				1A0000000000000000000015 /* CPADashboardMetrics.swift */,
 				1A0000000000000000000016 /* CPAConfigChannels.swift */,
 				1A000000000000000000001B /* ConfiguredModelMetadata.swift */,
+				1A000000000000000000002A /* AccountCooldown.swift */,
 				1A0000000000000000000017 /* CPAModelPool.swift */,
 				1A0000000000000000000018 /* CPARoutingModels.swift */,
 				1A0000000000000000000013 /* CPAClient.swift */,
@@ -224,6 +227,7 @@
 				1A0000000000000000000119 /* CPADashboardMetrics.swift in Sources */,
 				1A0000000000000000000120 /* CPAConfigChannels.swift in Sources */,
 				1A0000000000000000000126 /* ConfiguredModelMetadata.swift in Sources */,
+				1A0000000000000000000127 /* AccountCooldown.swift in Sources */,
 				1A0000000000000000000121 /* CPAModelPool.swift in Sources */,
 				1A0000000000000000000122 /* CPARoutingModels.swift in Sources */,
 				1A0000000000000000000113 /* CPAClient.swift in Sources */,

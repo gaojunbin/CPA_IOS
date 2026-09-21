@@ -286,7 +286,7 @@ struct QuotaDetailSection: View {
                         .minimumScaleFactor(0.75)
                 }
 
-                if let reason = account.account.quota?.reason ?? account.account.statusMessage, !reason.isEmpty {
+                if let reason = account.account.activeCooldowns.first(where: { $0.scope == "credential" })?.reasonDescription ?? account.account.quota?.reason ?? account.account.statusMessage, !reason.isEmpty {
                     DetailRow(title: "原因", value: reason)
                 }
                 if let nextRecoveryDate = account.account.nextRecoveryDate {
@@ -341,7 +341,7 @@ struct ModelCooldownSection: View {
         DetailSection(title: "模型状态", systemImage: "hourglass") {
             if account.account.activeModelCooldowns.isEmpty {
                 EmptyStateView(
-                    title: account.account.hasModelRuntimeStatus ? "未报告模型限制" : "服务端未提供模型限制状态",
+                    title: (account.account.hasModelRuntimeStatus || account.account.cooldowns != nil) ? "未报告模型限制" : "服务端未提供模型限制状态",
                     systemImage: "info.circle"
                 )
             } else {
@@ -425,7 +425,7 @@ struct ModelListSection: View {
         .filter { !$0.isEmpty }
 
         for value in lookupValues {
-            if let exact = account.account.modelStates.first(where: { $0.key.lowercased() == value }) {
+            if let exact = account.account.modelRuntimeStates.first(where: { $0.key.lowercased() == value }) {
                 return exact.value
             }
         }

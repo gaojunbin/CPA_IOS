@@ -738,6 +738,7 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
     public let quota: QuotaState?
     public let modelStates: [String: ModelState]
     public let hasModelRuntimeStatus: Bool
+    public let cooldowns: [AccountCooldown]?
     public let lastError: ProviderError?
     public let idToken: CodexIDTokenClaims?
     public let antigravityCredits: AntigravityCredits?
@@ -805,6 +806,7 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
         case nextRefreshAfter = "next_refresh_after"
         case nextRefreshAfterCamel = "nextRefreshAfter"
         case quota
+        case cooldowns
         case modelStates = "model_states"
         case modelStatesCamel = "modelStates"
         case lastError = "last_error"
@@ -855,6 +857,7 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
         quota: QuotaState? = nil,
         modelStates: [String: ModelState] = [:],
         hasModelRuntimeStatus: Bool = false,
+        cooldowns: [AccountCooldown]? = nil,
         lastError: ProviderError? = nil,
         idToken: CodexIDTokenClaims? = nil,
         antigravityCredits: AntigravityCredits? = nil,
@@ -895,6 +898,7 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
         self.nextRetryAfter = nextRetryAfter
         self.nextRefreshAfter = nextRefreshAfter
         self.quota = quota
+        self.cooldowns = cooldowns
         self.modelStates = modelStates
         self.hasModelRuntimeStatus = hasModelRuntimeStatus || !modelStates.isEmpty
         self.lastError = lastError
@@ -992,6 +996,7 @@ public struct CPAAccount: Decodable, Identifiable, Equatable, Sendable {
         nextRefreshAfter = try container.decodeFlexibleDateIfPresent(forKey: .nextRefreshAfter)
             ?? container.decodeFlexibleDateIfPresent(forKey: .nextRefreshAfterCamel)
         quota = try container.decodeIfPresent(QuotaState.self, forKey: .quota)
+        cooldowns = try container.decodeIfPresent([AccountCooldown].self, forKey: .cooldowns)
         hasModelRuntimeStatus = try (container.contains(.modelStates) && !container.decodeNil(forKey: .modelStates))
             || (container.contains(.modelStatesCamel) && !container.decodeNil(forKey: .modelStatesCamel))
         modelStates = try container.decodeIfPresent([String: ModelState].self, forKey: .modelStates)
@@ -1081,6 +1086,16 @@ public struct ModelState: Decodable, Equatable, Sendable {
         case quota
         case updatedAt = "updated_at"
         case updatedAtCamel = "updatedAt"
+    }
+
+    public init(cooldown: AccountCooldown) {
+        status = "cooling"
+        statusMessage = cooldown.reasonDescription
+        unavailable = true
+        nextRetryAfter = cooldown.retryAt
+        lastError = nil
+        quota = nil
+        updatedAt = nil
     }
 
     public init(from decoder: Decoder) throws {
@@ -1564,7 +1579,7 @@ public extension CPAAccount {
             if let credits = antigravityCredits, credits.known {
                 return credits.available ? "Credits \(displayCredits(credits.creditAmount))" : "Credits 不足"
             }
-            return "账号就绪"
+            return activeModelCooldowns.isEmpty ? "账号就绪" : "部分模型冷却"
         case .cooling:
             if let activeModelIssueLine {
                 return activeModelIssueLine
@@ -1589,7 +1604,20 @@ public extension CPAAccount {
         }
     }
 
+    var activeCooldowns: [AccountCooldown] { (cooldowns ?? []).filter(\.isActive) }
+
+    var modelRuntimeStates: [String: ModelState] {
+        guard cooldowns != nil else { return modelStates }
+        var states: [String: ModelState] = [:]
+        for cooldown in activeCooldowns where cooldown.scope == "model" {
+            guard let key = cooldown.modelKey, !key.isEmpty else { continue }
+            states[key] = ModelState(cooldown: cooldown)
+        }
+        return states
+    }
+
     var nextRecoveryDate: Date? {
+        if cooldowns != nil { return activeCooldowns.compactMap(\.retryAt).min() }
         let modelRecoveryDate = modelStates.values
             .compactMap { futureDate($0.nextRetryAfter) }
             .min()
@@ -1602,7 +1630,7 @@ public extension CPAAccount {
     }
 
     var activeModelCooldowns: [(model: String, state: ModelState)] {
-        modelStates
+        modelRuntimeStates
             .filter { _, state in
                 let status = normalizedModelStatus(state)
                 let hasFutureRetry = futureDate(state.nextRetryAfter) != nil
@@ -1647,16 +1675,20 @@ public extension CPAAccount {
         if let antigravityCredits, antigravityCredits.known, !antigravityCredits.available {
             return .cooling
         }
-        if quota?.exceeded == true || unavailable || nextRecoveryDate != nil {
+        if cooldowns != nil {
+            if status?.lowercased() == "disabled" { return .disabled }
+            if status?.lowercased() == "error" || lastError != nil { return .error }
+            if unavailable || activeCooldowns.contains(where: { $0.scope == "credential" }) { return .cooling }
+        } else if quota?.exceeded == true || unavailable || nextRecoveryDate != nil {
             return .cooling
         }
         if let lastError, !lastError.message.isEmpty {
             return .error
         }
-        if hasActiveModelError {
+        if cooldowns == nil && hasActiveModelError {
             return .error
         }
-        if !activeModelCooldowns.isEmpty {
+        if cooldowns == nil && !activeModelCooldowns.isEmpty {
             return .cooling
         }
         switch status?.lowercased() {

@@ -2,7 +2,7 @@ import Foundation
 import CPAKit
 
 func validateConfiguredModels(_ check: (Bool, String) throws -> Void) throws {
-    // Fixture shapes follow CLIProxyAPI v7.2.155 config handlers and model registration.
+    // Fixture shapes follow CLIProxyAPI v7.3.10 config handlers and model registration.
     for kind in APIKeyChannelKind.allCases {
         let root: [String: Any] = [kind.rawValue: [[
             "api-key": "",
@@ -82,6 +82,38 @@ func validateManagementRuntimeCompatibility() throws {
     try expect(account.quotaLine == "账号就绪", "An active account does not prove available quota")
     let empty = try JSONDecoder().decode(CPAAccount.self, from: Data(#"{"id":"empty","model_states":{}}"#.utf8))
     try expect(empty.hasModelRuntimeStatus, "An explicitly returned runtime-state dictionary must be recognized")
+    let model: [String: Any] = ["scope": "model", "model_key": "gpt-5", "reason": "quota",
+                                "retry_at": "2099-01-01T00:00:00.123456789Z", "remaining_seconds": 20]
+    func decodeCooldowns(_ value: Any) throws -> CPAAccount {
+        try JSONDecoder().decode(CPAAccount.self, from: JSONSerialization.data(withJSONObject: [
+            "id": "test", "status": "active", "cooldowns": value,
+            "quota": ["signals": ["used": "100"]]
+        ]))
+    }
+    let partial = try decodeCooldowns([model])
+    try expect(partial.activeModelCooldowns.map(\.model) == ["gpt-5"], "Model cooldowns must be visible")
+    try expect(partial.modelRuntimeStates["gpt-5"]?.statusMessage == "模型额度冷却", "Cooldown reasons must be displayed")
+    try expect(partial.statusKind == .available, "A model cooldown must not block the whole credential")
+    try expect(partial.nextRecoveryDate != nil && partial.quota?.exceeded == false, "Cooldown timers and observed quota remain independent")
+    try expect(AccountQuota(account: partial, usage: nil, errorMessage: nil).isHealthy, "Partial model cooldowns preserve account health")
+    try expect(!partial.hasModelRuntimeStatus, "Cooldown snapshots do not assert positive model availability")
+    var credential = model
+    credential["scope"] = "credential"
+    credential["reason"] = "credential_quota"
+    let blocked = try decodeCooldowns([credential])
+    try expect(blocked.statusKind == .cooling && blocked.activeModelCooldowns.isEmpty, "Credential cooldowns must remain separate from model cooldowns")
+    let unknownCooldowns = try decodeCooldowns(NSNull())
+    try expect(unknownCooldowns.cooldowns == nil, "Null cooldowns mean unknown")
+    let emptyCooldowns = try decodeCooldowns([])
+    try expect(emptyCooldowns.cooldowns == [], "An empty cooldown snapshot means no reported timers")
+    var expired = model
+    expired["retry_at"] = "2000-01-01T00:00:00Z"
+    let cleared = try decodeCooldowns([expired])
+    try expect(cleared.activeModelCooldowns.isEmpty && cleared.nextRecoveryDate == nil, "Expired timers must disappear without leaving stale limitations")
+    var invalid = model
+    invalid["retry_at"] = "invalid"
+    let invalidCooldowns = try decodeCooldowns([invalid])
+    try expect(invalidCooldowns.activeCooldowns.isEmpty, "Malformed timers must not assert a restriction")
     for status in ["error", "failed", "disabled"] {
         let failed = CPAAccount(id: status, name: status, status: status)
         try expect(!AccountQuota(account: failed, usage: nil, errorMessage: nil).isHealthy, "Backend error status must not count as healthy")

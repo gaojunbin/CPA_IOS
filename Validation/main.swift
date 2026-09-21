@@ -2086,7 +2086,7 @@ func runValidation() async throws {
     try expect(readme.contains("`swift test` is not part of the local gate"), "README should document why swift test is not a local gate")
     try expect(readme.contains("bash -n Scripts/validate_local.sh Scripts/validate_xcode_release.sh"), "README should document shell script syntax validation")
     let validationScript = try fileText("Scripts/validate_local.sh")
-    try expect(validationScript.contains("swift run CPAKitValidation"), "local validation script should run CPAKitValidation")
+    try expect(validationScript.contains("swift run --scratch-path /tmp/cpa-ios-validation CPAKitValidation"), "local validation script should run CPAKitValidation")
     try expect(validationScript.contains("bash -n Scripts/validate_local.sh Scripts/validate_xcode_release.sh"), "local validation script should syntax-check shell scripts")
     try expect(validationScript.contains("git diff --check"), "local validation script should check whitespace errors")
     try expect(validationScript.contains("CPA_VALIDATE_XCODE"), "local validation script should expose an opt-in Xcode gate")

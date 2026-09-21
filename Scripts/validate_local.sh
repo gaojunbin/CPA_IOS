@@ -9,8 +9,8 @@ run() {
   "$@"
 }
 
-run swift build
-run swift run CPAKitValidation
+run swift build --scratch-path /tmp/cpa-ios-validation
+run swift run --scratch-path /tmp/cpa-ios-validation CPAKitValidation
 run swiftc -swift-version 6 -typecheck -parse-as-library App/*.swift Sources/CPAKit/*.swift
 run swiftc -typecheck -parse-as-library App/*.swift Sources/CPAKit/*.swift
 run bash -n Scripts/validate_local.sh Scripts/validate_xcode_release.sh
