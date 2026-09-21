@@ -162,3 +162,15 @@ DEVELOPMENT_TEAM=YOURTEAMID Scripts/validate_xcode_release.sh
 ```
 
 The release script requires a signing team before creating the Release archive, removes any stale archive at `CPA_ARCHIVE_PATH`, and verifies the `.xcarchive` directory was created. Set `CPA_PRODUCT_BUNDLE_IDENTIFIER` if you need to override the checked-in bundle identifier for a specific App Store Connect app record. Set `CPA_ALLOW_PROVISIONING_UPDATES=1` if the Xcode machine should let automatic signing create or update provisioning profiles.
+
+## App icon
+
+The monochrome Confluence mark represents multiple upstream channels converging into one managed endpoint. The artwork uses pure black and white, a consistent rounded stroke, and a generous safe area. The editable SVG is the only drawing source; platform exports are rendered directly at each required size.
+
+Regenerate the checked-in icon assets from this repository:
+
+```sh
+swift Scripts/generate_app_icon.swift
+```
+
+The iOS master is `App/Assets.xcassets/AppIcon.appiconset/AppIcon-iOS.svg`. The script reads `Contents.json` and exports every PNG slot as opaque RGB; iOS applies the corner mask.
