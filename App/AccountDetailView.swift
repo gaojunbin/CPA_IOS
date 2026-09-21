@@ -203,13 +203,13 @@ struct LiveQuotaDetailSection: View {
     let isRefreshing: Bool
 
     var body: some View {
-        DetailSection(title: "实时剩余额度", systemImage: "gauge.with.dots.needle.50percent") {
+        DetailSection(title: account.account.isDevin ? "Devin 额度" : "实时剩余额度", systemImage: "gauge.with.dots.needle.50percent") {
             VStack(spacing: 12) {
                 if isRefreshing {
                     HStack(spacing: 10) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("正在同步实时额度")
+                        Text(account.account.isDevin ? "正在刷新 Devin 额度" : "正在同步实时额度")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -218,7 +218,10 @@ struct LiveQuotaDetailSection: View {
                     .cpaInset(Color.teal.opacity(0.10))
                 }
 
-                if let fetchedAt = account.usage?.fetchedAt {
+                if case let .server(date) = account.usage?.observation {
+                    Label(date.map { "服务端观测于 \($0.formatted(date: .abbreviated, time: .standard))" } ?? "服务端未提供额度观测时间", systemImage: "clock")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if let fetchedAt = account.usage?.fetchedAt {
                     Label("同步于 \(relativeTime(fetchedAt))", systemImage: "clock")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)

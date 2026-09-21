@@ -244,6 +244,9 @@ public final class CPAClient: Sendable {
     }
 
     private func fetchUsage(for account: CPAAccount) async throws -> UsageSnapshot {
+        if account.isDevin {
+            return try await fetchDevinUsage(for: account)
+        }
         if account.isAntigravity {
             return try await fetchAntigravityUsage(for: account)
         }
@@ -488,11 +491,23 @@ public final class CPAClient: Sendable {
         throw CPAAPIError.decoding("empty Claude quota")
     }
 
+    private func fetchDevinUsage(for account: CPAAccount) async throws -> UsageSnapshot {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "name": account.name, "auth_index": account.authIndex ?? ""
+        ])
+        let (response, _): (DevinRefreshResponse, HTTPURLResponse) = try await request(
+            path: "/v0/management/auth-files/refresh", method: "POST", body: body
+        )
+        guard response.ok else { throw CPAAPIError.decoding("Devin refresh did not complete") }
+        return response.auth.quota.usage()
+    }
+
     private func fetchKimiUsage(for account: CPAAccount) async throws -> UsageSnapshot {
         try await fetchUsageViaAPICall(payload: APICallRequest(
             authIndex: account.authIndex ?? "",
             method: "GET",
-            url: "https://api.kimi.com/coding/v1/usages",
+            url: account.normalizedProvider == "kimi-ai"
+                ? "https://api.kimi.ai/coding/v1/usages" : "https://api.kimi.com/coding/v1/usages",
             header: ["Authorization": "Bearer $TOKEN$"],
             data: nil
         ))

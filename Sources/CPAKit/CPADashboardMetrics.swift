@@ -40,6 +40,8 @@ public enum ProviderQuotaMetricKind: String, CaseIterable, Equatable, Hashable, 
     case antigravityClaudeGPTSevenDay
     case xaiWeekly
     case xaiMonthly
+    case devinDaily
+    case devinWeekly
 
     public var cardLabel: String {
         switch self {
@@ -51,6 +53,8 @@ public enum ProviderQuotaMetricKind: String, CaseIterable, Equatable, Hashable, 
         case .antigravityClaudeGPTSevenDay: return "Claude/GPT 7d"
         case .xaiWeekly: return "周积分"
         case .xaiMonthly: return "月积分"
+        case .devinDaily: return "每日额度"
+        case .devinWeekly: return "每周额度"
         }
     }
 
@@ -69,6 +73,8 @@ public enum ProviderQuotaMetricKind: String, CaseIterable, Equatable, Hashable, 
             ]
         case "xai":
             return [.xaiWeekly, .xaiMonthly]
+        case "devin", "cognition":
+            return [.devinDaily, .devinWeekly]
         default:
             return []
         }
@@ -80,6 +86,10 @@ public enum ProviderQuotaMetricKind: String, CaseIterable, Equatable, Hashable, 
         guard Self.metrics(for: providerKey).contains(self) else { return [] }
 
         switch self {
+        case .devinDaily:
+            return usage.primary.map { [$0] } ?? []
+        case .devinWeekly:
+            return usage.weekly.map { [$0] } ?? []
         case .codexFiveHour:
             return usage.primary.map { [$0] } ?? []
         case .codexSevenDay:

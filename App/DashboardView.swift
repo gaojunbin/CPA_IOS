@@ -5,6 +5,7 @@ struct DashboardView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel = DashboardViewModel()
     @State private var showsSettings = false
+    @State private var showsAddAccount = false
     #if DEBUG
     // Launch argument `-CPAAutoOpenScreen models|routing` deep-links the insight
     // screens so simulator automation can exercise them. Debug builds only.
@@ -75,6 +76,11 @@ struct DashboardView: View {
                         await connectionStore.reconcileQuotaAlertAuthorization()
                         viewModel.refreshIfStale(using: connectionStore.connection ?? connection)
                     }
+                }
+            }
+            .sheet(isPresented: $showsAddAccount) {
+                AddAccountView(client: CPAClient(baseURL: connection.baseURL, managementKey: connection.managementKey)) {
+                    viewModel.refresh(using: connection)
                 }
             }
             .sheet(isPresented: $showsSettings) {
@@ -217,6 +223,10 @@ struct DashboardView: View {
                     ))
                 } label: {
                     Label("API 密钥", systemImage: "key.horizontal.fill")
+                }
+
+                Button { showsAddAccount = true } label: {
+                    Label("新增账号", systemImage: "person.badge.plus")
                 }
 
                 Divider()
@@ -443,6 +453,8 @@ private struct ProviderPulseTile: View {
                 ("Claude/GPT 5h", value(.antigravityClaudeGPTFiveHour)),
                 ("Claude/GPT 7d", value(.antigravityClaudeGPTSevenDay))
             ]
+        case "devin":
+            return [("日", value(.devinDaily)), ("周", value(.devinWeekly))]
         case "xai":
             return [("周", value(.xaiWeekly)), ("月", value(.xaiMonthly))]
         default:

@@ -764,6 +764,7 @@ func validateAPIKeyManagementEndToEnd() async throws {
 func runValidation() async throws {
     try validateConfiguredModels { try expect($0, $1) }
     try validateManagementRuntimeCompatibility()
+    try await validateProviderCompatibility()
     try validateMacOSV130Parity()
     try await validateRoutingSnapshotEndToEnd()
     try await validateAPIKeyManagementEndToEnd()

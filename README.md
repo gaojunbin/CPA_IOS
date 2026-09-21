@@ -10,7 +10,7 @@ The app mirrors the CPA macOS status bar workflow on iPhone, with navigation and
 - Preview the finished dashboard with bundled demo data before saving any credentials, or reopen the demo from Settings later.
 - Demo mode covers Codex, Claude, Antigravity, Kimi, Grok, and a disabled Gemini account.
 - Demo account detail includes bundled model metadata and runtime badges, so review can inspect model status without a live server.
-- Show healthy/total account status as the headline signal, matching macOS v1.3.0 without treating low remaining quota as a connection failure.
+- Show healthy/total account status as the headline signal, matching macOS without treating low remaining quota as a connection failure.
 - Show provider-specific equal-weight quota averages: Codex and Claude 5h/7d, Antigravity Gemini and Claude/GPT 5h/7d, and Grok weekly/monthly credits.
 - Open a phone-adapted **Model Pool** screen with channel grouping, credential coverage, descriptions, context/output limits, modalities, web-search, and thinking capabilities.
 - Open a phone-adapted **Upstream Model Routing** screen with strategy, force-prefix policy, config/OAuth routes, route pools, priorities, exclusions, sanitized endpoints, and per-account overrides.
@@ -45,6 +45,12 @@ The app mirrors the CPA macOS status bar workflow on iPhone, with navigation and
 - When low-quota alerts are enabled, register Background App Refresh so iOS can opportunistically refresh quota and generate local alerts while the app is not foregrounded.
 - Open the dashboard when a low-quota local notification is tapped.
 
+## Account authorization and current providers
+
+Open the dashboard menu and choose **新增账号**. Both native clients support Codex, Claude, Antigravity, Grok/xAI, Kimi, Kimi.ai, Devin, and Meta authorization. Open or share the browser link; redirect providers require the complete loopback callback URL. Devin uses the actual server port at `http://127.0.0.1:<port>/callback`. Device providers show any required user code and complete through polling. Closing the sheet cancels the pending session. The app verifies callback state and only reports success after the server confirms credential persistence.
+
+Devin refresh uses `/v0/management/auth-files/refresh` with one filename and auth index. Only the safe quota projection is retained, including plan, daily/weekly remaining percentages, reset times, and server observation time. Invalid or expired windows remain unknown, and quota signals do not become scheduler cooldowns. Meta exposes account/model status without fabricated live quota. Kimi.ai keeps its own coding API domain. Model/routing inventory also covers Meta and Grok API-key config channels.
+
 ## Multiple Services
 
 The app can monitor multiple CLIProxyAPI services ("号池" / pools) and switch between them instantly. Services are fully independent and never share data.
@@ -64,7 +70,7 @@ The app can monitor multiple CLIProxyAPI services ("号池" / pools) and switch 
   - `remote-management.secret-key` configured, or `MANAGEMENT_PASSWORD` set
 - The app sends `Authorization: Bearer <management-key>`.
 - Management requests use an ephemeral URLSession with no persistent URL cache or cookie storage, plus explicit no-store request headers.
-- Live quota requires `/v0/management/api-call`. Supported provider contracts match macOS v1.3.0: Codex/OpenAI WHAM plus reset-credit metadata, Claude usage/profile, Antigravity quota summary/subscription with legacy fallback, Kimi usage, and xAI/Grok weekly plus monthly billing.
+- Live quota requires `/v0/management/api-call`. Supported provider contracts match macOS: Codex/OpenAI WHAM plus reset-credit metadata, Claude usage/profile, Antigravity quota summary/subscription with legacy fallback, Kimi usage, and xAI/Grok weekly plus monthly billing.
 - Model and routing insights additionally read `/auth-files/models`, config-channel endpoints, `/model-definitions/:channel`, OAuth alias/exclusion settings, `/routing/strategy`, `/force-model-prefix`, and safe file-backed `/auth-files/download` metadata.
 - API key management uses `GET/PATCH/DELETE /v0/management/api-keys` with the server's `old == new` append semantics; generated keys use `SecRandomCopyBytes` and are only placed on the pasteboard by an explicit user action.
 - Use HTTPS for internet-facing servers. The app rejects public `http://` URLs; HTTP is accepted only for localhost, private IP, link-local, single-label LAN names, and `.local`/`.lan`/`.home.arpa` LAN endpoints.
