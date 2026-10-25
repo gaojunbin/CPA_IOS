@@ -53,6 +53,16 @@ git diff --check
 - Native generic iOS Simulator build passed. This environment requires `-disable-sandbox` for the SwiftUI compiler macro process; the outer filesystem restrictions remain enabled. The CoreSimulator service is unavailable, so this is build evidence, not rendered UI or running-device acceptance.
 - No live-provider login/quota acceptance, physical-device background/notification checks, signed archive, TestFlight, or App Store submission was performed.
 
+## Grok zero-usage correction (2026-10-25)
+
+- Client starting commit: `d4b072aab4a2fc3473ce398cc7cccf11a0319b94`. The read-only upstream reference remains `v7.3.11`, `ffe6ad3c5fcf0a5eedd2198cd2e04b0249dc5063`.
+- Read-only authenticated billing requests on 2026-10-24 reproduced a weekly period with an omitted usage scalar and a monthly response with both limit and usage equal to zero. No account identifiers or credentials are retained in fixtures.
+- Decode omitted ProtoJSON usage scalars only within recognized weekly/product records and decode present empty xAI `Cent` messages as zero. Explicit null, invalid values, missing records, and request failures remain unknown or errors.
+- Preserve `usedPercent`, usage text, amounts, and reset metadata in Grok dashboard cards. A zero monthly limit and zero usage display `已用 0.0%`; remaining quota and usability stay unknown because a zero budget does not establish available credit. Weekly cards retain the remaining-percentage convention and also show `已用 0.0%`.
+- xAI documents the empty zero-valued `Cent` representation in its [billing implementation](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-shell/src/extensions/billing.rs). Management endpoints, bearer authentication, server-side `$TOKEN$` substitution, other providers, and settings are unchanged.
+- Release version: `1.3.1`, build `7`. The added validation source belongs only to the package validation target; no app source membership changed. Package validation, native archive/signing, installation, and App Store/TestFlight distribution are separate checks.
+- The local Swift toolchain stalled during startup after a system restart. The release workflow runs `Scripts/validate_local.sh`, archives the native iOS target, and uploads an unsigned IPA plus SHA-256. An unsigned IPA requires signing before installation; development signing remains a separate local step. Swift validation builds and native archive builds use two jobs.
+
 ## Next sync
 
 Compare `ffe6ad3c5fcf0a5eedd2198cd2e04b0249dc5063..HEAD` in the upstream reference. Include newly introduced built-in providers in the audit, preserve accurate quota semantics, and validate both native builds. Record live/cloud/distribution acceptance separately.

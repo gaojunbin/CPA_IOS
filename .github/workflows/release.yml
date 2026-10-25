@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Validate and package iOS app
+    runs-on: macos-latest
+    env:
+      TZ: Asia/Singapore
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run local validation
+        run: Scripts/validate_local.sh
+
+      - name: Archive iOS app
+        run: |
+          xcodebuild \
+            -project CPA-IOS.xcodeproj \
+            -scheme CPA-IOS \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath /tmp/cpa-ios-release/CPA-IOS.xcarchive \
+            -derivedDataPath /tmp/cpa-ios-release/derived-data \
+            -jobs 2 \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=/tmp/cpa-ios-release/CPA-IOS.xcarchive/Products/Applications/CPA-IOS.app
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo 'Release tag does not match the application version.' >&2
+            exit 1
+          fi
+          mkdir -p /tmp/cpa-ios-release/Payload /tmp/cpa-ios-artifacts
+          ditto "$app" /tmp/cpa-ios-release/Payload/CPA-IOS.app
+          ipa="CPA-$version-iOS-unsigned.ipa"
+          ditto -c -k --norsrc --keepParent /tmp/cpa-ios-release/Payload "/tmp/cpa-ios-artifacts/$ipa"
+          cd /tmp/cpa-ios-artifacts
+          shasum -a 256 "$ipa" > "CPA-$version-iOS-SHA256.txt"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CPA-iOS
+          path: /tmp/cpa-ios-artifacts/*
+          if-no-files-found: error

@@ -560,6 +560,7 @@ func validateMacOSV130Parity() throws {
     try expect(antigravity.additionalWindows.first?.remainingPercent == 75, "Antigravity bucket quota failed")
 
     let grokJSON = #"{"_provider":"xai","weekly":{"config":{"creditUsagePercent":25}},"monthly":{"config":{"monthlyLimit":5000,"used":1000}}}"#
+    try validateGrokZeroUsage()
     let grok = try require(UsageParser.parse(grokJSON), "modern Grok quota did not parse")
     try expect(grok.additionalWindows.contains { $0.id == "xai-weekly-credits" }, "Grok weekly credits missing")
     try expect(grok.additionalWindows.contains { $0.id == "xai-monthly-credits" }, "Grok monthly credits missing")
@@ -2132,7 +2133,7 @@ func runValidation() async throws {
     try expect(projectFile.contains("CPARoutingModels.swift in Sources"), "Xcode project should compile routing models")
     try expect(projectFile.contains("CPAClientRouting.swift in Sources"), "Xcode project should compile routing client support")
     try expect(projectFile.contains("ServiceInsightsView.swift in Sources"), "Xcode project should compile phone-adapted model and routing screens")
-    try expect(projectFile.contains("MARKETING_VERSION = 1.3.0"), "iOS release version should match macOS v1.3.0")
+    try expect(projectFile.contains("MARKETING_VERSION = 1.3.1"), "iOS release version should be 1.3.1")
     try expect(projectFile.contains("QuotaAlertNotifier.swift in Sources"), "Xcode project should compile QuotaAlertNotifier.swift")
     try expect(projectFile.contains("BackgroundQuotaRefreshScheduler.swift in Sources"), "Xcode project should compile background refresh scheduler")
     try expect(projectFile.contains("PrivacyInfo.xcprivacy in Resources"), "Xcode project should bundle PrivacyInfo.xcprivacy")
