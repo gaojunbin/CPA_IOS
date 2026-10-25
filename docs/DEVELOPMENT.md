@@ -29,8 +29,8 @@ Scripts/validate_local.sh
 The script runs the CLT-compatible checks below:
 
 ```sh
-swift build --scratch-path /tmp/cpa-ios-validation
-swift run --scratch-path /tmp/cpa-ios-validation CPAKitValidation
+swift build --jobs 2 --scratch-path /tmp/cpa-ios-validation
+swift run --jobs 2 --scratch-path /tmp/cpa-ios-validation CPAKitValidation
 swiftc -swift-version 6 -typecheck -parse-as-library App/*.swift Sources/CPAKit/*.swift
 swiftc -typecheck -parse-as-library App/*.swift Sources/CPAKit/*.swift
 bash -n Scripts/validate_local.sh Scripts/validate_xcode_release.sh

@@ -60,8 +60,9 @@ git diff --check
 - Decode omitted ProtoJSON usage scalars only within recognized weekly/product records and decode present empty xAI `Cent` messages as zero. Explicit null, invalid values, missing records, and request failures remain unknown or errors.
 - Preserve `usedPercent`, usage text, amounts, and reset metadata in Grok dashboard cards. A zero monthly limit and zero usage display `已用 0.0%`; remaining quota and usability stay unknown because a zero budget does not establish available credit. Weekly cards retain the remaining-percentage convention and also show `已用 0.0%`.
 - xAI documents the empty zero-valued `Cent` representation in its [billing implementation](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-shell/src/extensions/billing.rs). Management endpoints, bearer authentication, server-side `$TOKEN$` substitution, other providers, and settings are unchanged.
-- Release version: `1.3.1`, build `7`. The added validation source belongs only to the package validation target; no app source membership changed. Package validation, native archive/signing, installation, and App Store/TestFlight distribution are separate checks.
+- Release version: `1.3.2`, build `8`. The added validation source belongs only to the package validation target; no app source membership changed. Package validation, native archive/signing, installation, and App Store/TestFlight distribution are separate checks.
 - The local Swift toolchain stalled during startup after a system restart. The release workflow runs `Scripts/validate_local.sh`, archives the native iOS target, and uploads an unsigned IPA plus SHA-256. An unsigned IPA requires signing before installation; development signing remains a separate local step. Swift validation builds and native archive builds use two jobs.
+- The first CI run found stale validation assumptions from the earlier README split. Documentation assertions now read the README and both linked guides, and the script assertion recognizes bounded Swift concurrency. The unsuccessful `v1.3.1` tag is retained; it produced no installer.
 
 ## Next sync
 
