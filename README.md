@@ -22,6 +22,8 @@ Available features depend on your CPA server version and provider. Live quota is
 
 Requires **iOS 16 or later**. Follow the [Xcode installation guide](docs/DEVELOPMENT.md#install-from-source) to install the app.
 
+[GitHub Releases](https://github.com/gaojunbin/CPA_IOS/releases/latest) also provide IPA downloads. Development-signed builds only install on devices registered in their provisioning profile; unsigned builds require your own signing before installation.
+
 1. Open CPA and add your server's HTTPS address and management key, or try demo mode first.
 2. View your accounts and quota; pull to refresh for the latest information.
 3. Enable quota alerts in Settings if you want local notifications.

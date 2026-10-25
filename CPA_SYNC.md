@@ -63,6 +63,8 @@ git diff --check
 - Release version: `1.3.2`, build `8`. The added validation source belongs only to the package validation target; no app source membership changed. Package validation, native archive/signing, installation, and App Store/TestFlight distribution are separate checks.
 - The local Swift toolchain stalled during startup after a system restart. The release workflow runs `Scripts/validate_local.sh`, archives the native iOS target, and uploads an unsigned IPA plus SHA-256. An unsigned IPA requires signing before installation; development signing remains a separate local step. Swift validation builds and native archive builds use two jobs.
 - The first CI run found stale validation assumptions from the earlier README split. Documentation assertions now read the README and both linked guides, and the script assertion recognizes bounded Swift concurrency. The unsuccessful `v1.3.1` tag is retained; it produced no installer.
+- [GitHub Actions run 40180081960](https://github.com/gaojunbin/CPA_IOS/actions/runs/40180081960) passed package regressions, both app typechecks, resource/project checks, and the native Release archive for `28bf6252cfe32c15b889c1f7cb3043bcae094c26`.
+- The downloaded unsigned IPA matched its checksum and contained the `arm64` iOS app with version `1.3.2`, build `8`. A development IPA was signed locally using an existing valid certificate and matching profile for three registered devices; strict recursive signature verification and archive integrity passed. Both IPA variants have SHA-256 checksums. Physical-device installation and rendered UI acceptance were not performed.
 
 ## Next sync
 
