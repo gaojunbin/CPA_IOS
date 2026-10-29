@@ -118,7 +118,7 @@ actor UpstreamRouteSession: CPAHTTPSession {
         recordedRequests.append(request)
         let path = request.url?.path ?? ""
         let payload: Data
-        if path == "/v0/management/api-call",
+        if path == "/v8/management/requests/api-call",
            let body = request.httpBody,
            let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
            let upstreamURL = object["url"] as? String {
@@ -187,12 +187,12 @@ func validateDashboardClient(apiKeyUsageJSON: Data) async throws {
     }
     """.data(using: .utf8)!
     let dashboardSession = RouteSession(routes: [
-        "/v0/management/auth-files": (200, dashboardAuthFilesJSON),
+        "/v8/management/credentials": (200, dashboardAuthFilesJSON),
         "/v0/management/api-key-usage": (200, apiKeyUsageJSON),
         "/v0/management/quota-exceeded/switch-project": (200, Data(#"{"switch-project":true}"#.utf8)),
         "/v0/management/quota-exceeded/switch-preview-model": (200, Data(#"{"switch-preview-model":false}"#.utf8))
     ], responseHeaders: [
-        "/v0/management/auth-files": [
+        "/v8/management/credentials": [
             "X-CPA-VERSION": "v7.1.0",
             "X-CPA-COMMIT": "abcdef1234567890",
             "X-CPA-BUILD-DATE": "2026-05-30T01:02:03Z"
@@ -219,13 +219,14 @@ func validateDashboardClient(apiKeyUsageJSON: Data) async throws {
             dashboardPaths.append(path)
         }
     }
-    try expect(dashboardPaths.contains("/v0/management/auth-files"), "dashboard auth-files request missing")
+    try expect(dashboardPaths.contains("/v8/management/credentials"), "dashboard credentials request missing")
+    try expect(!dashboardPaths.contains("/v0/management/auth-files"), "dashboard should not use the legacy auth-files route")
     try expect(!dashboardPaths.contains("/v0/management/api-key-usage"), "base dashboard should not delay refresh for unused API-key usage")
     try expect(!dashboardPaths.contains("/v0/management/quota-exceeded/switch-project"), "base dashboard should not request unused quota switches")
-    try expect(!dashboardPaths.contains("/v0/management/api-call"), "base dashboard should not fetch live usage")
+    try expect(!dashboardPaths.contains("/v8/management/requests/api-call"), "base dashboard should not fetch live usage")
     let dashboardAuthRequest = try require(
-        dashboardRequests.first { $0.url?.path == "/v0/management/auth-files" },
-        "dashboard auth-files request should be recorded"
+        dashboardRequests.first { $0.url?.path == "/v8/management/credentials" },
+        "dashboard credentials request should be recorded"
     )
     try expect(dashboardAuthRequest.cachePolicy == .reloadIgnoringLocalCacheData, "management requests should bypass URL caches")
     try expect(dashboardAuthRequest.value(forHTTPHeaderField: "Authorization") == "Bearer secret", "management requests should send bearer auth")
@@ -621,9 +622,9 @@ func validateRoutingSnapshotEndToEnd() async throws {
     """.utf8)
 
     let session = RouteSession(routes: [
-        "/v0/management/auth-files": (200, authFilesJSON),
-        "/v0/management/auth-files/models": (200, authModelsJSON),
-        "/v0/management/auth-files/download": (200, downloadJSON),
+        "/v8/management/credentials": (200, authFilesJSON),
+        "/v8/management/credentials/models": (200, authModelsJSON),
+        "/v8/management/credentials/download": (200, downloadJSON),
         "/v0/management/openai-compatibility": (200, compatJSON),
         "/v0/management/oauth-model-alias": (200, aliasJSON),
         "/v0/management/oauth-excluded-models": (200, excludedJSON),
@@ -766,6 +767,8 @@ func runValidation() async throws {
     try validateConfiguredModels { try expect($0, $1) }
     try validateManagementRuntimeCompatibility()
     try await validateProviderCompatibility()
+    try await validateV8ManagementClient()
+    try validateCurrentQuotaPayloads()
     try validateMacOSV130Parity()
     try await validateRoutingSnapshotEndToEnd()
     try await validateAPIKeyManagementEndToEnd()
@@ -778,6 +781,8 @@ func runValidation() async throws {
     try expect(managementAPIURL.absoluteString == "https://proxy.example.com/cpa", "subpath management API URL normalization failed")
     let rootManagementAPIURL = try CPABaseURLNormalizer.normalize("https://proxy.example.com/v0/management/api-call")
     try expect(rootManagementAPIURL.absoluteString == "https://proxy.example.com", "root management API URL normalization failed")
+    let v8ManagementAPIURL = try CPABaseURLNormalizer.normalize("https://proxy.example.com/cpa/v8/management/credentials?name=codex.json")
+    try expect(v8ManagementAPIURL.absoluteString == "https://proxy.example.com/cpa", "v8 management API URL normalization failed")
 
     let localhostURL = try CPABaseURLNormalizer.normalize("127.0.0.1:8317")
     try expect(localhostURL.absoluteString == "http://127.0.0.1:8317", "localhost URL normalization failed")
@@ -1459,7 +1464,8 @@ func runValidation() async throws {
     try expect(claudeUsage.planType == "专业版", "claude plan parsing failed")
     try expect(claudeUsage.additionalWindows.map(\.label) == ["5 小时限额", "7 天 Opus", "额外用量"], "claude labels failed")
     try expect(claudeUsage.additionalWindows.first?.remainingPercent == 75, "claude remaining percent failed")
-    try expect(claudeUsage.additionalWindows.last?.amountText == "$1.23 / $10.00", "claude extra usage amount failed")
+    try expect(claudeUsage.additionalWindows.last?.displayValue == "已启用", "claude extra usage state failed")
+    try expect(claudeUsage.additionalWindows.last?.amountText == "已花费 $1.23 / 限额 $10.00", "claude extra usage amount failed")
     let claudeCurrencyUsageJSON = """
     {
       "_provider": "claude",
@@ -1473,7 +1479,7 @@ func runValidation() async throws {
     }
     """
     let claudeCurrencyUsage = try require(UsageParser.parse(claudeCurrencyUsageJSON), "claude currency usage sample did not parse")
-    try expect(claudeCurrencyUsage.additionalWindows.last?.amountText == "$1.23 / $10.00", "claude currency amount parsing failed")
+    try expect(claudeCurrencyUsage.additionalWindows.last?.amountText == "已花费 $1.23 / 限额 $10.00", "claude currency amount parsing failed")
 
     let kimiUsageJSON = """
     {
@@ -1498,11 +1504,11 @@ func runValidation() async throws {
     }
     """
     let kimiUsage = try require(UsageParser.parse(kimiUsageJSON), "kimi usage sample did not parse")
-    try expect(kimiUsage.additionalWindows.map(\.label) == ["周限额", "7天限额"], "kimi labels failed")
-    try expect(kimiUsage.additionalWindows.first?.remainingPercent == 60, "kimi summary remaining failed")
-    try expect(kimiUsage.additionalWindows.first?.amountText == "40 / 100", "kimi amount text failed")
-    try expect(kimiUsage.additionalWindows.first?.detailText == "1小时后重置", "kimi reset text should be localized")
-    try expect(kimiUsage.additionalWindows.last?.remainingPercent == 90, "kimi detail remaining failed")
+    try expect(kimiUsage.additionalWindows.map(\.label) == ["7天限额", "周限额"], "kimi labels failed")
+    try expect(kimiUsage.additionalWindows.first?.remainingPercent == 90, "kimi detail remaining failed")
+    try expect(kimiUsage.additionalWindows.last?.remainingPercent == 60, "kimi summary remaining failed")
+    try expect(kimiUsage.additionalWindows.last?.amountText == "40 / 100", "kimi amount text failed")
+    try expect(kimiUsage.additionalWindows.last?.detailText == "1小时后重置", "kimi reset text should be localized")
     let kimiCommaUsageJSON = """
     {
       "usage": {
@@ -2032,8 +2038,8 @@ func runValidation() async throws {
     try expect(appStoreMetadata.contains("Publish `PRIVACY_POLICY.md`"), "App Store metadata should call out required privacy policy URL source")
     try expect(appStoreMetadata.contains("DEVELOPMENT_TEAM=YOURTEAMID Scripts/validate_xcode_release.sh"), "App Store metadata should include the release validation command")
     try expect(appStoreMetadata.contains("CPA_ALLOW_PROVISIONING_UPDATES=1"), "App Store metadata should document optional provisioning updates")
-    try expect(supportPage.contains("remote-management.allow-remote"), "support page should document remote management setup")
-    try expect(supportPage.contains("/v0/management/api-call"), "support page should document live quota API requirements")
+    try expect(supportPage.contains("`management.allow-remote`"), "support page should document remote management setup")
+    try expect(supportPage.contains("/v8/management/requests/api-call"), "support page should document live quota API requirements")
     try expect(supportPage.contains("Copy Diagnostics"), "support page should document diagnostics copy")
     try expect(supportPage.contains("generation time"), "support page should document diagnostics timestamps")
     try expect(supportPage.contains("does not include the key value"), "support page should document no-key diagnostics")
@@ -2135,7 +2141,7 @@ func runValidation() async throws {
     try expect(projectFile.contains("CPARoutingModels.swift in Sources"), "Xcode project should compile routing models")
     try expect(projectFile.contains("CPAClientRouting.swift in Sources"), "Xcode project should compile routing client support")
     try expect(projectFile.contains("ServiceInsightsView.swift in Sources"), "Xcode project should compile phone-adapted model and routing screens")
-    try expect(projectFile.contains("MARKETING_VERSION = 1.3.2"), "iOS release version should be 1.3.2")
+    try expect(projectFile.contains("MARKETING_VERSION = 1.4.0"), "iOS release version should be 1.4.0")
     try expect(projectFile.contains("QuotaAlertNotifier.swift in Sources"), "Xcode project should compile QuotaAlertNotifier.swift")
     try expect(projectFile.contains("BackgroundQuotaRefreshScheduler.swift in Sources"), "Xcode project should compile background refresh scheduler")
     try expect(projectFile.contains("PrivacyInfo.xcprivacy in Resources"), "Xcode project should bundle PrivacyInfo.xcprivacy")
@@ -2333,7 +2339,7 @@ func runValidation() async throws {
     try expect(configSource.contains("maskedSecret"), "config-channel credentials should never expose full secrets")
     let clientRoutingSource = try fileText("Sources/CPAKit/CPAClientRouting.swift")
     try expect(clientRoutingSource.contains("fetchModelRoutingSnapshot"), "client should fetch a routing snapshot")
-    try expect(clientRoutingSource.contains("auth-files/download"), "routing should read per-account metadata only for safe file-backed auth entries")
+    try expect(clientRoutingSource.contains("credentials/download"), "routing should read per-account metadata only for safe file-backed auth entries")
     let apiKeysClientSource = try fileText("Sources/CPAKit/CPAClientAPIKeys.swift")
     try expect(apiKeysClientSource.contains("public func generateAPIKey"), "client should generate strong random api keys")
     try expect(apiKeysClientSource.contains("SecRandomCopyBytes"), "generated api keys should use SecRandomCopyBytes")
@@ -2578,7 +2584,7 @@ func runValidation() async throws {
         return object["url"] as? String == "https://chatgpt.com/backend-api/wham/usage"
     }, "live quota request missing")
     try expect(liveRequest.httpMethod == "POST", "live quota should use POST")
-    try expect(liveRequest.url?.absoluteString == "https://proxy.example.com/v0/management/api-call", "live quota URL failed")
+    try expect(liveRequest.url?.absoluteString == "https://proxy.example.com/v8/management/requests/api-call", "live quota URL failed")
     let liveBodyData = try require(liveRequest.httpBody, "live quota body missing")
     let liveBody = try require(
         JSONSerialization.jsonObject(with: liveBodyData) as? [String: Any],
@@ -2627,7 +2633,7 @@ func runValidation() async throws {
     let antigravitySubscriptionEnvelope = Data(#"{"status_code":200,"body":{"paidTier":{"id":"g1-pro-tier","name":"Google AI Pro"}}}"#.utf8)
     let antigravitySession = UpstreamRouteSession(
         managementRoutes: [
-            "/v0/management/auth-files/download": Data(#"{"project_id":"project-from-auth-file"}"#.utf8)
+            "/v8/management/credentials/download": Data(#"{"project_id":"project-from-auth-file"}"#.utf8)
         ],
         upstreamRoutes: [
             "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary": antigravityEnvelope,
@@ -2645,7 +2651,7 @@ func runValidation() async throws {
     let antigravityRequests = await antigravitySession.requests
     try expect(
         antigravityRequests.contains {
-            $0.url?.absoluteString == "https://proxy.example.com/v0/management/auth-files/download?name=antigravity.json"
+            $0.url?.absoluteString == "https://proxy.example.com/v8/management/credentials/download?name=antigravity.json"
         },
         "antigravity project fallback should download the auth file"
     )
@@ -2664,6 +2670,12 @@ func runValidation() async throws {
     )
     try expect(antigravityBody["auth_index"] as? String == "ag-index", "antigravity api-call auth_index failed")
     try expect((antigravityBody["data"] as? String)?.contains("project-from-auth-file") == true, "antigravity api-call should use project_id from downloaded auth file")
+    let antigravityCalls = apiCallPayloads(antigravityRequests)
+    try expect(antigravityCalls.contains { ($0["url"] as? String)?.contains("loadCodeAssist") == true }, "antigravity quota should read subscription metadata")
+    try expect(
+        antigravityCalls.allSatisfy { apiCallHeaders($0)["User-Agent"] == "antigravity/hub/2.23.0 darwin/arm64" },
+        "antigravity quota and subscription requests should use the Hub identity"
+    )
 
     let objectBodyEnvelope = """
     {
@@ -2725,7 +2737,7 @@ func runValidation() async throws {
     try expect(providerErrorQuota.errorMessage?.contains("\"error\"") == false, "api-call envelope errors should not surface raw JSON")
 
     let nestedErrorSession = RouteSession(routes: [
-        "/v0/management/auth-files": (
+        "/v8/management/credentials": (
             502,
             Data(#"{"error":{"message":"upstream quota endpoint failed","code":"bad_gateway"}}"#.utf8)
         )
@@ -2744,7 +2756,7 @@ func runValidation() async throws {
     }
 
     let arrayErrorSession = RouteSession(routes: [
-        "/v0/management/auth-files": (
+        "/v8/management/credentials": (
             502,
             Data(#"{"errors":[{"message":"provider array failure","code":"bad_gateway"}]}"#.utf8)
         )
@@ -2823,7 +2835,7 @@ func runValidation() async throws {
     _ = try await client.fetchModels(for: account)
     let modelURL = try require(session.lastRequest?.url?.absoluteString, "model request URL missing")
     try expect(
-        modelURL == "https://proxy.example.com/cpa/v0/management/auth-files/models?name=auth-1",
+        modelURL == "https://proxy.example.com/cpa/v8/management/credentials/models?name=auth-1",
         "subpath model URL failed: \(modelURL)"
     )
 }

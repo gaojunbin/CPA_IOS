@@ -37,11 +37,17 @@ public final class CPAClient: Sendable {
     ]
     private static let antigravitySubscriptionURL =
         "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
-    private static let antigravityUserAgent =
-        "antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)"
-    private static let xaiClientVersion = "0.2.93"
+    // Matches the management web UI's Antigravity Hub identity; Cloud Code withholds
+    // newer models from clients below Hub 2.23.0.
+    private static let antigravityUserAgent = "antigravity/hub/2.23.0 darwin/arm64"
+    // cli-chat-proxy rejects Grok CLI versions below 1.0.13 with HTTP 426.
+    private static let xaiClientVersion = "1.0.46"
     private static let xaiBillingWeeklyURL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
     private static let xaiBillingMonthlyURL = "https://cli-chat-proxy.grok.com/v1/billing"
+    private static let claudeUserAgent = "claude-cli/2.1.280 (external, cli)"
+    private static let codexUserAgent =
+        "codex-tui/0.149.1 (Mac OS 26.5.2; arm64) iTerm.app/3.6.11 (codex-tui; 0.149.1)"
+    private static let metaQuotaURL = "https://api.meta.ai/muse-code/key"
     private static let accountQuotaBatchSize = 6
     private static let modelBatchSize = 8
 
@@ -57,9 +63,7 @@ public final class CPAClient: Sendable {
     }
 
     public func fetchDashboard(includeLiveUsage: Bool = true) async throws -> ManagementDashboard {
-        let authFilesResult: (AuthFilesResponse, HTTPURLResponse) = try await request(
-            path: "/v0/management/auth-files"
-        )
+        let authFilesResult = try await fetchCredentials()
         let accounts = authFilesResult.0.files
         let accountQuotas = includeLiveUsage
             ? await fetchAccountQuotas(accounts)
@@ -75,11 +79,21 @@ public final class CPAClient: Sendable {
         )
     }
 
+    /// Lists file and OAuth credentials (`GET /v8/management/credentials`).
+    func fetchCredentials() async throws -> (AuthFilesResponse, HTTPURLResponse) {
+        do {
+            return try await request(path: "/v8/management/credentials")
+        } catch CPAAPIError.httpStatus(let code, _) where code == 404 {
+            // Servers before v8.0.0 do not expose the /v8/management routes.
+            throw CPAAPIError.unsupportedServer
+        }
+    }
+
     public func fetchModels(for account: CPAAccount) async throws -> [CPAModelDefinition] {
         // Multiple virtual accounts can share a filename; the server also accepts the unique auth ID.
         let queryName = account.id.isEmpty ? account.name : account.id
         let response: (ModelsResponse, HTTPURLResponse) = try await request(
-            path: "/v0/management/auth-files/models",
+            path: "/v8/management/credentials/models",
             queryItems: [URLQueryItem(name: "name", value: queryName)]
         )
         return response.0.models
@@ -259,6 +273,9 @@ public final class CPAClient: Sendable {
         if account.isXAI {
             return try await fetchXAIUsage(for: account)
         }
+        if account.isMeta {
+            return try await fetchMetaUsage(for: account)
+        }
         return try await fetchWhamUsage(for: account)
     }
 
@@ -267,7 +284,7 @@ public final class CPAClient: Sendable {
             "Authorization": "Bearer $TOKEN$",
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "User-Agent": "codex_cli_rs/0.76.0 (Mac OS 15.0.0; arm64) CPA-iOS/1.3"
+            "User-Agent": Self.codexUserAgent
         ]
         if let accountID = account.chatgptAccountID, !accountID.isEmpty {
             headers["ChatGPT-Account-Id"] = accountID
@@ -444,11 +461,14 @@ public final class CPAClient: Sendable {
     }
 
     private func fetchClaudeUsage(for account: CPAAccount) async throws -> UsageSnapshot {
-        let headers = [
+        var headers = [
             "Authorization": "Bearer $TOKEN$",
             "Content-Type": "application/json",
+            "User-Agent": Self.claudeUserAgent,
             "anthropic-beta": "oauth-2025-04-20"
         ]
+        let profileHeaders = headers
+        headers["Accept"] = "application/json"
         let usagePayload = APICallRequest(
             authIndex: account.authIndex ?? "",
             method: "GET",
@@ -460,7 +480,7 @@ public final class CPAClient: Sendable {
             authIndex: account.authIndex ?? "",
             method: "GET",
             url: "https://api.anthropic.com/api/oauth/profile",
-            header: headers,
+            header: profileHeaders,
             data: nil
         )
         async let usageTask = fetchAPICallEnvelope(payload: usagePayload)
@@ -496,7 +516,7 @@ public final class CPAClient: Sendable {
             "name": account.name, "auth_index": account.authIndex ?? ""
         ])
         let (response, _): (DevinRefreshResponse, HTTPURLResponse) = try await request(
-            path: "/v0/management/auth-files/refresh", method: "POST", body: body
+            path: "/v8/management/credentials/refresh", method: "POST", body: body
         )
         guard response.ok else { throw CPAAPIError.decoding("Devin refresh did not complete") }
         return response.auth.quota.usage()
@@ -506,11 +526,47 @@ public final class CPAClient: Sendable {
         try await fetchUsageViaAPICall(payload: APICallRequest(
             authIndex: account.authIndex ?? "",
             method: "GET",
-            url: account.normalizedProvider == "kimi-ai"
+            url: account.providerKey == "kimi-ai"
                 ? "https://api.kimi.ai/coding/v1/usages" : "https://api.kimi.com/coding/v1/usages",
             header: ["Authorization": "Bearer $TOKEN$"],
             data: nil
         ))
+    }
+
+    /// Meta's quota endpoint takes the persisted DCA token, not the LLM key behind `$TOKEN$`.
+    /// The token and the response body stay request-local: errors never include the body,
+    /// which can echo the API key and profile data.
+    private func fetchMetaUsage(for account: CPAAccount) async throws -> UsageSnapshot {
+        guard let body = try? await downloadAuthFile(named: account.name),
+              let dcaToken = Self.metaDCAToken(fromAuthFileBody: body)
+        else {
+            throw CPAAPIError.decoding("missing Meta dca_token")
+        }
+        let envelope = try await fetchAPICallEnvelope(payload: APICallRequest(
+            authIndex: account.authIndex ?? "",
+            method: "POST",
+            url: Self.metaQuotaURL,
+            header: [
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": "Bearer \(dcaToken)",
+                "x-api-version": "1.0.0"
+            ],
+            data: "{}"
+        ))
+        guard (200..<300).contains(envelope.statusCode) else {
+            throw CPAAPIError.httpStatus(code: envelope.statusCode, message: "Meta quota request failed")
+        }
+        guard let response = Self.jsonObject(from: envelope.body) else {
+            throw CPAAPIError.decoding("invalid Meta quota response")
+        }
+        var quota: [String: Any] = [:]
+        quota["subs_usage"] = response["subs_usage"]
+        quota["subs_tier_name"] = response["subs_tier_name"]
+        guard let snapshot = UsageParser.parse(try jsonString(["_provider": "meta", "quota": quota])) else {
+            throw CPAAPIError.decoding("invalid Meta quota response")
+        }
+        return snapshot
     }
 
     private func fetchXAIUsage(for account: CPAAccount) async throws -> UsageSnapshot {
@@ -592,7 +648,7 @@ public final class CPAClient: Sendable {
         for attempt in 1...2 {
             do {
                 let result: (APICallEnvelope, HTTPURLResponse) = try await request(
-                    path: "/v0/management/api-call",
+                    path: "/v8/management/requests/api-call",
                     method: "POST",
                     body: body,
                     timeout: 65
@@ -653,7 +709,7 @@ public final class CPAClient: Sendable {
             throw CPAAPIError.invalidResponse
         }
         let (data, _) = try await dataRequest(
-            path: "/v0/management/auth-files/download",
+            path: "/v8/management/credentials/download",
             queryItems: [URLQueryItem(name: "name", value: trimmed)]
         )
         return String(data: data, encoding: .utf8) ?? ""
@@ -673,6 +729,16 @@ public final class CPAClient: Sendable {
             firstString(nested(root, "web", "project_id")),
             firstString(nested(root, "web", "projectId"))
         )
+    }
+
+    /// Only the persisted `dca:` token is accepted; the LLM API key is never a fallback.
+    private static func metaDCAToken(fromAuthFileBody body: String) -> String? {
+        guard let token = firstString(jsonObject(from: body)?["dca_token"]),
+              token.range(of: #"^dca:\S+$"#, options: .regularExpression) != nil
+        else {
+            return nil
+        }
+        return token
     }
 
     private static func jsonObject(from body: String) -> [String: Any]? {

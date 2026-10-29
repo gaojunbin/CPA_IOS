@@ -57,7 +57,7 @@ public enum CPABaseURLNormalizer {
             guard index + 1 < components.endIndex else {
                 return false
             }
-            return components[index].lowercased() == "v0" &&
+            return ["v0", "v8"].contains(components[index].lowercased()) &&
                 components[index + 1].lowercased() == "management"
         }) {
             components = Array(components[..<managementIndex])

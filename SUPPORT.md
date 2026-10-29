@@ -6,9 +6,10 @@ CPA Panel is a client for self-hosted CLIProxyAPI instances. It does not provide
 
 Check the CLIProxyAPI server configuration first:
 
+- The server runs CLIProxyAPI v8.0.0 or later; older servers report that v8.0.0 or later is required.
 - Management routes are enabled.
-- `remote-management.allow-remote` is enabled when connecting from iPhone or iPad.
-- `remote-management.secret-key` or `MANAGEMENT_PASSWORD` is configured.
+- `management.allow-remote` (legacy layout: `remote-management.allow-remote`) is enabled when connecting from iPhone or iPad.
+- `management.secret-key` (legacy layout: `remote-management.secret-key`) or `MANAGEMENT_PASSWORD` is configured.
 - Internet-facing servers use HTTPS.
 - Local HTTP servers are reachable from the iPhone or iPad on the same trusted network.
 
@@ -22,7 +23,7 @@ If the server is on a local network, confirm the iOS device is on the same netwo
 
 ### No Live Quota
 
-Live quota requires the CLIProxyAPI `/v0/management/api-call` route. Some providers expose identity or status only; unsupported providers can still appear in the account list without live quota windows.
+Live quota requires the CLIProxyAPI `/v8/management/requests/api-call` route. Some providers expose identity or status only; unsupported providers can still appear in the account list without live quota windows.
 
 ### Notifications Do Not Appear
 

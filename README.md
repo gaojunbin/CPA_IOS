@@ -20,7 +20,7 @@ Available features depend on your CPA server version and provider. Live quota is
 
 ## Get started
 
-Requires **iOS 16 or later**. Follow the [Xcode installation guide](docs/DEVELOPMENT.md#install-from-source) to install the app.
+Requires **iOS 16 or later** and **CLIProxyAPI v8.0.0 or later** on the server. Follow the [Xcode installation guide](docs/DEVELOPMENT.md#install-from-source) to install the app.
 
 [GitHub Releases](https://github.com/gaojunbin/CPA_IOS/releases/latest) also provide IPA downloads. Development-signed builds only install on devices registered in their provisioning profile; unsigned builds require your own signing before installation.
 

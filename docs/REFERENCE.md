@@ -17,7 +17,7 @@
 - Pin low-quota, cooling, and error accounts near the top of the dashboard.
 - Use one configurable attention threshold for optional low-quota local alerts.
 - Sort local alert candidates with that same threshold.
-- Fetch per-account quota windows through `/v0/management/api-call`.
+- Fetch per-account quota windows through `/v8/management/requests/api-call`.
 - Refresh one account directly from its detail screen and see when live quota was last synced.
 - Apply account detail refresh results back to the dashboard list immediately.
 - Load account-detail live quota and model metadata independently so slow quota providers do not block model status visibility.
@@ -28,7 +28,7 @@
 - Show quota reset timing directly in account rows when the upstream provider returns it.
 - Display reset countdowns and provider quota windows with localized Chinese timing text.
 - Show provider-level 5h/7d averages and lowest remaining quota in each provider section header.
-- Render each channel's quota from live upstream payloads: Codex rolling/monthly/code-review/reset-credit windows, Antigravity groups/buckets plus subscription credits with a legacy model fallback, Claude usage/profile, Kimi usage, and Grok weekly/product/monthly/PAYG windows.
+- Render each channel's quota from live upstream payloads: Codex rolling/monthly/code-review/reset-credit windows, Antigravity groups/buckets plus subscription credits with a legacy model fallback, Claude usage/profile, Kimi usage, Meta Muse quota, and Grok weekly/product/monthly/PAYG windows.
 - Coalesce refresh triggers so manual refresh, foreground resume, and timer refresh do not stack duplicate sync jobs.
 - Show compact localized connection and network errors for unreachable servers.
 - Surface provider runtime status, model cooldowns, recent request activity, and account metadata in account detail.
@@ -47,7 +47,7 @@
 
 Open the dashboard menu and choose **新增账号**. Both native clients support Codex, Claude, Antigravity, Grok/xAI, Kimi, Kimi.ai, Devin, and Meta authorization. Open or share the browser link; redirect providers require the complete loopback callback URL. Devin uses the actual server port at `http://127.0.0.1:<port>/callback`. Device providers show any required user code and complete through polling. Closing the sheet cancels the pending session. The app verifies callback state and only reports success after the server confirms credential persistence.
 
-Devin refresh uses `/v0/management/auth-files/refresh` with one filename and auth index. Only the safe quota projection is retained, including plan, daily/weekly remaining percentages, reset times, and server observation time. Invalid or expired windows remain unknown, and quota signals do not become scheduler cooldowns. Meta exposes account/model status without fabricated live quota. Kimi.ai keeps its own coding API domain. Model/routing inventory also covers Meta and Grok API-key config channels.
+Devin refresh uses `/v8/management/credentials/refresh` with one filename and auth index. Only the safe quota projection is retained, including plan, daily/weekly remaining percentages, reset times, and server observation time. Invalid or expired windows remain unknown, and quota signals do not become scheduler cooldowns. Meta quota uses the credential's persisted `dca:` token (never the LLM API key) and keeps only plan, rolling-window, and weekly usage; missing usage stays unknown. Kimi.ai keeps its own coding API domain. Model/routing inventory also covers Meta and Grok API-key config channels.
 
 ## Multiple Services
 
@@ -62,14 +62,15 @@ The app can monitor multiple CLIProxyAPI services ("号池" / pools) and switch 
 
 ## Backend Requirements
 
+- CLIProxyAPI v8.0.0 or later is required. Credentials, live quota calls, OAuth, and model definitions use `/v8/management`; configuration reads and API key management use `/v0/management`, which v8 servers continue to serve. A server without the v8 routes reports that v8.0.0 or later is required.
 - CLIProxyAPI management routes must be enabled.
 - Remote access must be allowed when connecting from iPhone:
-  - `remote-management.allow-remote: true`
-  - `remote-management.secret-key` configured, or `MANAGEMENT_PASSWORD` set
+  - `management.allow-remote: true` (legacy layout: `remote-management.allow-remote`)
+  - `management.secret-key` configured (legacy layout: `remote-management.secret-key`), or `MANAGEMENT_PASSWORD` set
 - The app sends `Authorization: Bearer <management-key>`.
 - Management requests use an ephemeral URLSession with no persistent URL cache or cookie storage, plus explicit no-store request headers.
-- Live quota requires `/v0/management/api-call`. Supported provider contracts match macOS: Codex/OpenAI WHAM plus reset-credit metadata, Claude usage/profile, Antigravity quota summary/subscription with legacy fallback, Kimi usage, and xAI/Grok weekly plus monthly billing.
-- Model and routing insights additionally read `/auth-files/models`, config-channel endpoints, `/model-definitions/:channel`, OAuth alias/exclusion settings, `/routing/strategy`, `/force-model-prefix`, and safe file-backed `/auth-files/download` metadata.
+- Live quota requires `/v8/management/requests/api-call`. Supported provider contracts match macOS: Codex/OpenAI WHAM plus reset-credit metadata, Claude usage/profile, Antigravity quota summary/subscription with legacy fallback, Kimi usage, Meta Muse quota, and xAI/Grok weekly plus monthly billing.
+- Model and routing insights additionally read `/v8/management/credentials/models`, config-channel endpoints, `/v8/management/routing/model-definitions/:channel`, OAuth alias/exclusion settings, `/routing/strategy`, `/force-model-prefix`, and safe file-backed `/v8/management/credentials/download` metadata.
 - API key management uses `GET/PATCH/DELETE /v0/management/api-keys` with the server's `old == new` append semantics; generated keys use `SecRandomCopyBytes` and are only placed on the pasteboard by an explicit user action.
 - Use HTTPS for internet-facing servers. The app rejects public `http://` URLs; HTTP is accepted only for localhost, private IP, link-local, single-label LAN names, and `.local`/`.lan`/`.home.arpa` LAN endpoints.
 

@@ -2,7 +2,10 @@ import Foundation
 
 public extension CPAClient {
     func requestOAuthURL(for provider: OAuthProvider) async throws -> OAuthAuthURL {
-        let (data, _) = try await dataRequest(path: provider.authPath)
+        let (data, _) = try await dataRequest(
+            path: "/v8/management/oauth/auth-url",
+            queryItems: [URLQueryItem(name: "provider", value: provider.authProvider)]
+        )
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let url = object["url"] as? String,
               let components = URLComponents(string: url), components.scheme == "https", components.host != nil,
@@ -20,12 +23,12 @@ public extension CPAClient {
         let body = try JSONSerialization.data(withJSONObject: [
             "provider": provider, "redirect_url": redirectURL, "state": state
         ])
-        _ = try await dataRequest(path: "/v0/management/oauth-callback", method: "POST", body: body)
+        _ = try await dataRequest(path: "/v8/management/oauth/callback", method: "POST", body: body)
     }
 
     func pollOAuthStatus(state: String) async throws -> OAuthStatus {
         let (data, _) = try await dataRequest(
-            path: "/v0/management/get-auth-status", queryItems: [URLQueryItem(name: "state", value: state)]
+            path: "/v8/management/oauth/status", queryItems: [URLQueryItem(name: "state", value: state)]
         )
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw CPAAPIError.decoding("Invalid OAuth status response")
@@ -41,7 +44,7 @@ public extension CPAClient {
     func cancelOAuthSession(state: String) async throws {
         guard !state.isEmpty else { return }
         _ = try await dataRequest(
-            path: "/v0/management/oauth-session", method: "DELETE",
+            path: "/v8/management/oauth/session", method: "DELETE",
             queryItems: [URLQueryItem(name: "state", value: state)]
         )
     }

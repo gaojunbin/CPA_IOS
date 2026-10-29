@@ -188,7 +188,7 @@ public extension CPAClient {
 
     func fetchStaticModelDefinitions(channel: String) async throws -> [CPAModelDefinition] {
         let response: (ModelsResponse, HTTPURLResponse) = try await request(
-            path: "/v0/management/model-definitions/\(channel)"
+            path: "/v8/management/routing/model-definitions/\(channel)"
         )
         return response.0.models
     }
@@ -196,10 +196,7 @@ public extension CPAClient {
 
 private extension CPAClient {
     func fetchAuthFiles() async throws -> [CPAAccount] {
-        let response: (AuthFilesResponse, HTTPURLResponse) = try await request(
-            path: "/v0/management/auth-files"
-        )
-        return response.0.files
+        try await fetchCredentials().0.files
     }
 
     func buildModelPool(
@@ -383,7 +380,7 @@ private extension CPAClient {
     ) async -> OAuthAccountRoutingOverride? {
         guard let name = Self.downloadableAuthJSONName(for: account),
               let response = try? await dataRequest(
-                  path: "/v0/management/auth-files/download",
+                  path: "/v8/management/credentials/download",
                   queryItems: [URLQueryItem(name: "name", value: name)]
               )
         else {

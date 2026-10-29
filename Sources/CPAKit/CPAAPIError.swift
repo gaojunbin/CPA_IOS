@@ -8,11 +8,14 @@ public enum CPAAPIError: Error, Equatable, LocalizedError {
     case httpStatus(code: Int, message: String)
     case decoding(String)
     case transport(String)
+    case unsupportedServer
 
     public var errorDescription: String? {
         switch self {
         case .invalidBaseURL:
             return "服务器地址无效"
+        case .unsupportedServer:
+            return "需要 CLIProxyAPI v8.0.0 或更高版本并启用管理 API（/v8/management 返回 404）"
         case let .unsupportedScheme(scheme):
             return "不支持的地址协议: \(scheme)"
         case let .insecureHTTPHost(host):
